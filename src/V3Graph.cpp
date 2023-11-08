@@ -14,6 +14,8 @@
 //
 //*************************************************************************
 
+#define VL_MT_DISABLED_CODE_UNIT 1
+
 #include "config_build.h"
 #include "verilatedos.h"
 
@@ -92,26 +94,6 @@ void V3GraphVertex::rerouteEdges(V3Graph* graphp) {
 bool V3GraphVertex::inSize1() const { return !inEmpty() && !inBeginp()->inNextp(); }
 bool V3GraphVertex::outSize1() const { return !outEmpty() && !outBeginp()->outNextp(); }
 
-uint32_t V3GraphVertex::inHash() const {
-    // We want the same hash ignoring the order of edges.
-    // So we need an associative operator, like XOR.
-    // However with XOR multiple edges to the same source will cancel out,
-    // so we use ADD.  (Generally call this only after removing duplicates though)
-    uint32_t hash = 0;
-    for (V3GraphEdge* edgep = this->inBeginp(); edgep; edgep = edgep->inNextp()) {
-        hash += cvtToHash(edgep->fromp());
-    }
-    return hash;
-}
-
-uint32_t V3GraphVertex::outHash() const {
-    uint32_t hash = 0;
-    for (V3GraphEdge* edgep = this->outBeginp(); edgep; edgep = edgep->outNextp()) {
-        hash += cvtToHash(edgep->top());
-    }
-    return hash;
-}
-
 V3GraphEdge* V3GraphVertex::findConnectingEdgep(GraphWay way, const V3GraphVertex* waywardp) {
     // O(edges) linear search. Searches search both nodes' edge lists in
     // parallel.  The lists probably aren't _both_ huge, so this is
@@ -129,7 +111,7 @@ V3GraphEdge* V3GraphVertex::findConnectingEdgep(GraphWay way, const V3GraphVerte
 }
 
 // cppcheck-has-bug-suppress constParameter
-void V3GraphVertex::v3errorEnd(std::ostringstream& str) const VL_REQUIRES(V3Error::s().m_mutex) {
+void V3GraphVertex::v3errorEnd(std::ostringstream& str) const VL_RELEASE(V3Error::s().m_mutex) {
     std::ostringstream nsstr;
     nsstr << str.str();
     if (debug()) {
@@ -139,11 +121,11 @@ void V3GraphVertex::v3errorEnd(std::ostringstream& str) const VL_REQUIRES(V3Erro
     if (FileLine* const flp = fileline()) {
         flp->v3errorEnd(nsstr);
     } else {
-        V3Error::s().v3errorEnd(nsstr);
+        V3Error::v3errorEnd(nsstr);
     }
 }
 void V3GraphVertex::v3errorEndFatal(std::ostringstream& str) const
-    VL_REQUIRES(V3Error::s().m_mutex) {
+    VL_RELEASE(V3Error::s().m_mutex) {
     v3errorEnd(str);
     assert(0);  // LCOV_EXCL_LINE
     VL_UNREACHABLE;
@@ -284,7 +266,7 @@ void V3Graph::loopsVertexCb(V3GraphVertex* vertexp) {
     if (debug()) std::cerr << "-Info-Loop: " << cvtToHex(vertexp) << " " << vertexp << endl;
 }
 
-void V3Graph::dump(std::ostream& os) {
+void V3Graph::dump(std::ostream& os) const {
     // This generates a file used by graphviz, https://www.graphviz.org
     os << " Graph:\n";
     // Print vertices
@@ -302,7 +284,8 @@ void V3Graph::dump(std::ostream& os) {
     }
 }
 
-void V3Graph::dumpEdge(std::ostream& os, const V3GraphVertex* vertexp, const V3GraphEdge* edgep) {
+void V3Graph::dumpEdge(std::ostream& os, const V3GraphVertex* vertexp,
+                       const V3GraphEdge* edgep) const {
     if (edgep->weight() && (edgep->fromp() == vertexp || edgep->top() == vertexp)) {
         os << "\t\t";
         if (edgep->fromp() == vertexp) os << "-> " << edgep->top()->name();

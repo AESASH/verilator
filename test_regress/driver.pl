@@ -153,6 +153,9 @@ if ($#opt_tests < 0) {  # Run everything
 @opt_tests = _calc_hashset(@opt_tests) if $opt_hashset;
 
 if ($#opt_tests >= 2 && $opt_jobs >= 2) {
+    # Read supported into master process, so don't call every subprocess
+    _have_coroutines();
+    _have_sc();
     # Without this tests such as t_debug_sigsegv_bt_bad.pl will occasionally
     # block on input and cause a SIGSTOP, then a "fg" was needed to resume testing.
     if (!$::Have_Forker) {
@@ -287,6 +290,35 @@ sub _calc_hashset {
         }
     }
     return @new;
+}
+
+#######################################################################
+# Verilator utilities
+
+our %_Verilator_Supported;
+sub _verilator_get_supported {
+    my $feature = shift;
+    # Returns if given feature is supported
+    if (!defined $_Verilator_Supported{$feature}) {
+        my @args = ("perl", "$ENV{VERILATOR_ROOT}/bin/verilator", "-get-supported", $feature);
+        my $args = join(' ', @args);
+        my $out = `$args`;
+        $out or die "couldn't run: $! " . join(' ', @args);
+        chomp $out;
+        $_Verilator_Supported{$feature} = ($out =~ /1/ ? 1 : 0);
+    }
+    return $_Verilator_Supported{$feature};
+}
+
+sub _have_coroutines {
+    return 1 if _verilator_get_supported('COROUTINES');
+    return 0;
+}
+
+sub _have_sc {
+    return 1 if (defined $ENV{SYSTEMC} || defined $ENV{SYSTEMC_INCLUDE} || $ENV{CFG_HAVE_SYSTEMC});
+    return 1 if _verilator_get_supported('SYSTEMC');
+    return 0;
 }
 
 #######################################################################
@@ -889,21 +921,24 @@ sub compile_vlt_flags {
     my %param = (%{$self}, @_);  # Default arguments are from $self
     return 1 if $self->errors || $self->skips;
 
-    my $checkflags = join(' ', @{$param{v_flags}},
-                          @{$param{v_flags2}},
-                          @{$param{verilator_flags}},
-                          @{$param{verilator_flags2}},
-                          @{$param{verilator_flags3}});
+    my $checkflags = (' '.join(' ',
+                               @{$param{v_flags}},
+                               @{$param{v_flags2}},
+                               @{$param{verilator_flags}},
+                               @{$param{verilator_flags2}},
+                               @{$param{verilator_flags3}})
+                      .' ');
     die "%Error: specify threads via 'threads =>' argument, not as a command line option" unless ($checkflags !~ /(^|\s)-?-threads\s/);
+    $self->{coverage} = 1 if ($checkflags =~ /-coverage\b/);
+    $self->{savable} = 1 if ($checkflags =~ /-savable\b/);
     $self->{sc} = 1 if ($checkflags =~ /-sc\b/);
+    $self->{timing} = 1 if ($checkflags =~ / -?-timing\b/ || $checkflags =~ / -?-binary\b/ );
     $self->{trace} = ($opt_trace || $checkflags =~ /-trace\b/
                       || $checkflags =~ /-trace-fst\b/);
     $self->{trace_format} = (($checkflags =~ /-trace-fst/ && $self->{sc} && 'fst-sc')
                              || ($checkflags =~ /-trace-fst/ && !$self->{sc} && 'fst-c')
                              || ($self->{sc} && 'vcd-sc')
                              || (!$self->{sc} && 'vcd-c'));
-    $self->{savable} = 1 if ($checkflags =~ /-savable\b/);
-    $self->{coverage} = 1 if ($checkflags =~ /-coverage\b/);
     $self->{sanitize} = $opt_sanitize unless exists($self->{sanitize});
     $self->{benchmarksim} = 1 if ($param{benchmarksim});
 
@@ -1113,7 +1148,10 @@ sub compile {
             $self->skip("Test requires SystemC; ignore error since not installed\n");
             return 1;
         }
-
+        if ($self->{timing} && !$self->have_coroutines) {
+            $self->skip("Test requires Coroutines; ignore error since not available\n");
+            return 1;
+        }
         if ($param{verilator_make_cmake} && !$self->have_cmake) {
             $self->skip("Test requires CMake; ignore error since not available or version too old\n");
             return 1;
@@ -1464,16 +1502,11 @@ sub sc {
 }
 
 sub have_sc {
-    my $self = (ref $_[0] ? shift : $Self);
-    return 1 if (defined $ENV{SYSTEMC} || defined $ENV{SYSTEMC_INCLUDE} || $ENV{CFG_HAVE_SYSTEMC});
-    return 1 if $self->verilator_get_supported('SYSTEMC');
-    return 0;
+    return ::_have_sc();
 }
 
 sub have_coroutines {
-    my $self = (ref $_[0] ? shift : $Self);
-    return 1 if $self->verilator_get_supported('COROUTINES');
-    return 0;
+    return ::_have_coroutines();
 }
 
 sub make_version {
@@ -1625,10 +1658,14 @@ sub _run {
             $SIG{ALRM} = 'DEFAULT';
             $SIG{CHLD} = 'DEFAULT';
             # Logging
-            open(STDOUT, ">&CHILDWR") or croak "%Error: Can't redirect stdout, stopped";
-            open(STDERR, ">&STDOUT") or croak "%Error: Can't dup stdout, stopped";
-            autoflush STDOUT 1;
-            autoflush STDERR 1;
+            if (!$opt_gdb) {
+                # Redirecting the stdout of GDB prevents output syntax colors
+                # and the use of the TUI, so only redirect when not --gdb
+                open(STDOUT, ">&CHILDWR") or croak "%Error: Can't redirect stdout, stopped";
+                open(STDERR, ">&STDOUT") or croak "%Error: Can't dup stdout, stopped";
+                autoflush STDOUT 1;
+                autoflush STDERR 1;
+            }
             system "$command";
             my $status = $?;
             if (($status & 127) == 4  # SIGILL
@@ -1647,8 +1684,12 @@ sub _run {
     if (!$param{fails} && $status) {
         my $firstline = "";
         if (my $fh = IO::File->new("<$param{logfile}")) {
-            $firstline = $fh->getline || '';
-            chomp $firstline;
+            while (defined(my $line = $fh->getline)) {
+                next if $line =~ /^- /;  # Debug message
+                $firstline = $line;
+                chomp $firstline;
+                last;
+            }
         }
         $self->error("Exec of $param{cmd}[0] failed: $firstline\n");
     }
@@ -2156,25 +2197,6 @@ sub _read_inputs_vhdl {
 }
 
 #######################################################################
-# Verilator utilities
-
-our %_Verilator_Supported;
-sub verilator_get_supported {
-    my $self = (ref $_[0] ? shift : $Self);
-    my $feature = shift;
-    # Returns if given feature is supported
-    if (!defined $_Verilator_Supported{$feature}) {
-        my @args = ("perl", "$ENV{VERILATOR_ROOT}/bin/verilator", "-get-supported", $feature);
-        my $args = join(' ', @args);
-        my $out = `$args`;
-        $out or die "couldn't run: $! " . join(' ', @args);
-        chomp $out;
-        $_Verilator_Supported{$feature} = ($out =~ /1/ ? 1 : 0);
-    }
-    return $_Verilator_Supported{$feature};
-}
-
-#######################################################################
 # File utilities
 
 sub files_identical {
@@ -2215,7 +2237,7 @@ sub files_identical {
                     && !/\+\+\+ \/tmp\//  # t_difftree.pl
             } @l1;
             @l1 = map {
-                s/(Internal Error: [^\n]+\.(cpp|h)):[0-9]+:/$1:#:/;
+                while (s/(Internal Error: [^\n]+\.(cpp|h)):[0-9]+/$1:#/g) {}
                 s/^-V\{t[0-9]+,[0-9]+\}/-V{t#,#}/;  # --vlt vs --vltmt run differences
                 $_;
             } @l1;
@@ -2227,6 +2249,7 @@ sub files_identical {
                 $l1[$l] =~ s/CPU Time: +[0-9.]+ seconds[^\n]+/CPU Time: ###/mig;
                 $l1[$l] =~ s/\?v=[0-9.]+/?v=latest/mig;  # warning URL
                 $l1[$l] =~ s/_h[0-9a-f]{8}_/_h########_/mg;
+                $l1[$l] =~ s!%Error: \./!%Error: !mg; # clang gives ./ while GCC does not
                 $l1[$l] =~ s/ \/[^ ]+\/verilated_std.sv/ verilated_std.sv/mg;
                 if ($l1[$l] =~ s/Exiting due to.*/Exiting due to/mig) {
                     splice @l1, $l+1;  # Trunc rest

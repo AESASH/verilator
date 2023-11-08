@@ -43,8 +43,8 @@ class DfgVertexVar VL_NOT_FINAL : public DfgVertexVariadic {
     bool m_hasModRefs = false;  // This AstVar is referenced outside the DFG, but in the module
     bool m_hasExtRefs = false;  // This AstVar is referenced from outside the module
 
-    bool selfEquals(const DfgVertex& that) const final;
-    V3Hash selfHash() const final;
+    bool selfEquals(const DfgVertex& that) const final VL_MT_DISABLED;
+    V3Hash selfHash() const final VL_MT_DISABLED;
 
 public:
     DfgVertexVar(DfgGraph& dfg, VDfgType type, AstVar* varp, uint32_t initialCapacity)
@@ -92,8 +92,8 @@ class DfgConst final : public DfgVertex {
 
     V3Number m_num;  // Constant value
 
-    bool selfEquals(const DfgVertex& that) const override;
-    V3Hash selfHash() const override;
+    bool selfEquals(const DfgVertex& that) const override VL_MT_DISABLED;
+    V3Hash selfHash() const override VL_MT_DISABLED;
 
 public:
     DfgConst(DfgGraph& dfg, FileLine* flp, const V3Number& num)
@@ -158,8 +158,8 @@ class DfgSel final : public DfgVertexUnary {
     // the constant 'lsbp', and as 'DfgMux` for the non-constant 'lsbp'.
     uint32_t m_lsb = 0;  // The LSB index
 
-    bool selfEquals(const DfgVertex& that) const override;
-    V3Hash selfHash() const override;
+    bool selfEquals(const DfgVertex& that) const override VL_MT_DISABLED;
+    V3Hash selfHash() const override VL_MT_DISABLED;
 
 public:
     DfgSel(DfgGraph& dfg, FileLine* flp, AstNodeDType* dtypep)
@@ -224,7 +224,7 @@ public:
     uint32_t driverIndex(size_t idx) const { return m_driverData[idx].second; }
 
     DfgVertex* driverAt(size_t idx) const {
-        const DfgEdge* const edgep = findSourceEdge([=](const DfgEdge&, size_t i) {  //
+        const DfgEdge* const edgep = findSourceEdge([this, idx](const DfgEdge&, size_t i) {  //
             return driverIndex(i) == idx;
         });
         return edgep ? edgep->sourcep() : nullptr;

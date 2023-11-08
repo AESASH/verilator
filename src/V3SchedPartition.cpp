@@ -34,13 +34,9 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
-#include "V3Ast.h"
 #include "V3EmitV.h"
-#include "V3Error.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 #include "V3Sched.h"
 
@@ -55,6 +51,7 @@ namespace V3Sched {
 namespace {
 
 class SchedSenVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(SchedSenVertex, V3GraphVertex)
     const AstSenItem* const m_senItemp;
 
 public:
@@ -74,6 +71,7 @@ public:
 };
 
 class SchedLogicVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(SchedLogicVertex, V3GraphVertex)
     AstScope* const m_scopep;
     AstSenTree* const m_senTreep;
     AstNode* const m_logicp;
@@ -97,6 +95,7 @@ public:
 };
 
 class SchedVarVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(SchedVarVertex, V3GraphVertex)
     const AstVarScope* const m_vscp;
 
 public:
@@ -156,10 +155,9 @@ class SchedGraphBuilder final : public VNVisitor {
             // rst), so we use a hash map to get the unique SchedSenVertex. (Note: This creates
             // separate vertices for ET_CHANGED and ET_HYBRID over the same expression, but that is
             // OK for now).
-            auto it = m_senVertices.find(*senItemp);
-
+            const auto pair = m_senVertices.emplace(*senItemp, nullptr);
             // If it does not exist, create it
-            if (it == m_senVertices.end()) {
+            if (pair.second) {
                 // Create the vertex
                 SchedSenVertex* const vtxp = new SchedSenVertex{m_graphp, senItemp};
 
@@ -169,11 +167,11 @@ class SchedGraphBuilder final : public VNVisitor {
                 });
 
                 // Store back to hash map so we can find it next time
-                it = m_senVertices.emplace(*senItemp, vtxp).first;
+                pair.first->second = vtxp;
             }
 
             // Cache sensitivity vertex
-            senItemp->user1p(it->second);
+            senItemp->user1p(pair.first->second);
         }
         return senItemp->user1u().to<SchedSenVertex*>();
     }
@@ -186,7 +184,7 @@ class SchedGraphBuilder final : public VNVisitor {
 
         // Clocked or hybrid logic has explicit sensitivity, so add edge from sensitivity vertex
         if (!m_senTreep->hasCombo()) {
-            m_senTreep->foreach([=](AstSenItem* senItemp) {
+            m_senTreep->foreach([this, nodep, logicVtxp](AstSenItem* senItemp) {
                 if (senItemp->isIllegal()) return;
                 UASSERT_OBJ(senItemp->isClocked() || senItemp->isHybrid(), nodep,
                             "Non-clocked SenItem under clocked SenTree");
@@ -196,7 +194,7 @@ class SchedGraphBuilder final : public VNVisitor {
         }
 
         // Add edges based on references
-        nodep->foreach([=](const AstVarRef* vrefp) {
+        nodep->foreach([this, logicVtxp](const AstVarRef* vrefp) {
             AstVarScope* const vscp = vrefp->varScopep();
             if (vrefp->access().isReadOrRW() && m_readTriggersThisLogic(vscp)) {
                 new V3GraphEdge{m_graphp, getVarVertex(vscp), logicVtxp, 10};
@@ -208,7 +206,7 @@ class SchedGraphBuilder final : public VNVisitor {
 
         // If the logic calls a 'context' DPI import, it might fire the DPI Export trigger
         if (m_dpiExportTriggerp) {
-            nodep->foreach([=](const AstCCall* callp) {
+            nodep->foreach([this, logicVtxp](const AstCCall* callp) {
                 if (!callp->funcp()->dpiImportWrapper()) return;
                 if (!callp->funcp()->dpiContext()) return;
                 new V3GraphEdge{m_graphp, logicVtxp, getVarVertex(m_dpiExportTriggerp), 10};
@@ -299,7 +297,7 @@ void colorActiveRegion(const V3Graph& graph) {
 
     // Trace from all SchedSenVertex
     for (V3GraphVertex* vtxp = graph.verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-        if (const auto activeEventVtxp = dynamic_cast<SchedSenVertex*>(vtxp)) {
+        if (const auto activeEventVtxp = vtxp->cast<SchedSenVertex>()) {
             queue.push_back(activeEventVtxp);
         }
     }
@@ -323,9 +321,9 @@ void colorActiveRegion(const V3Graph& graph) {
         // If this is a logic vertex, also enqueue all variable vertices that are driven from this
         // logic. This will ensure that if a variable is set in the active region, then all
         // settings of that variable will be in the active region.
-        if (dynamic_cast<SchedLogicVertex*>(&vtx)) {
+        if (vtx.is<SchedLogicVertex>()) {
             for (V3GraphEdge* edgep = vtx.outBeginp(); edgep; edgep = edgep->outNextp()) {
-                UASSERT(dynamic_cast<SchedVarVertex*>(edgep->top()), "Should be var vertex");
+                UASSERT(edgep->top()->is<SchedVarVertex>(), "Should be var vertex");
                 queue.push_back(edgep->top());
             }
         }
@@ -350,7 +348,7 @@ LogicRegions partition(LogicByScope& clockedLogic, LogicByScope& combinationalLo
     LogicRegions result;
 
     for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-        if (const auto lvtxp = dynamic_cast<SchedLogicVertex*>(vtxp)) {
+        if (const auto lvtxp = vtxp->cast<SchedLogicVertex>()) {
             LogicByScope& lbs = lvtxp->color() ? result.m_act : result.m_nba;
             AstNode* const logicp = lvtxp->logicp();
             logicp->unlinkFrBack();

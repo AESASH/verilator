@@ -14,6 +14,8 @@
 //
 //*************************************************************************
 
+#define VL_MT_DISABLED_CODE_UNIT 1
+
 #include "config_build.h"
 #include "verilatedos.h"
 
@@ -32,6 +34,7 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 //      Break the minimal number of backward edges to make the graph acyclic
 
 class GraphAcycVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(GraphAcycVertex, V3GraphVertex)
     // user() is used for various sub-algorithm pieces
     V3GraphVertex* const m_origVertexp;  // Pointer to first vertex this represents
 protected:
@@ -56,6 +59,7 @@ public:
 //--------------------------------------------------------------------
 
 class GraphAcycEdge final : public V3GraphEdge {
+    VL_RTTI_IMPL(GraphAcycEdge, V3GraphEdge)
     // userp() is always used to point to the head original graph edge
 private:
     using OrigEdgeList = std::list<V3GraphEdge*>;  // List of orig edges, see also GraphAcyc's decl
@@ -570,7 +574,7 @@ void GraphAcyc::main() {
 
 void V3Graph::acyclic(V3EdgeFuncP edgeFuncp) {
     UINFO(4, "Acyclic\n");
-    GraphAcyc acyc(this, edgeFuncp);
+    GraphAcyc acyc{this, edgeFuncp};
     acyc.main();
     UINFO(4, "Acyclic done\n");
 }

@@ -14,6 +14,8 @@
 //
 //*************************************************************************
 
+#define VL_MT_DISABLED_CODE_UNIT 1
+
 #include "config_build.h"
 #include "verilatedos.h"
 
@@ -185,7 +187,7 @@ public:
     // For getline()
     string m_lineChars;  ///< Characters left for next line
 
-    void v3errorEnd(std::ostringstream& str) VL_REQUIRES(V3Error::s().m_mutex) {
+    void v3errorEnd(std::ostringstream& str) VL_RELEASE(V3Error::s().m_mutex) {
         fileline()->v3errorEnd(str);
     }
 
@@ -212,7 +214,7 @@ private:
 
     void parsingOn() {
         m_off--;
-        if (m_off < 0) fatalSrc("Underflow of parsing cmds");
+        if (m_off < 0) v3fatalSrc("Underflow of parsing cmds");
         // addLineComment no longer needed; getFinalToken will correct.
     }
     void parsingOff() { m_off++; }
@@ -356,7 +358,7 @@ string V3PreProcImp::removeDefines(const string& text) {
     string rtnsym = text;
     for (int loopprevent = 0; loopprevent < 100; loopprevent++) {
         string xsym = rtnsym;
-        if (xsym.substr(0, 1) == "`") xsym.replace(0, 1, "");
+        if (xsym[0] == '`') xsym.erase(0, 1);
         if (defExists(xsym)) {
             val = defValue(xsym);
             if (val != rtnsym) {
@@ -453,7 +455,7 @@ void V3PreProcImp::comment(const string& text) {
     if (!vlcomment && !synth) return;  // Short-circuit
 
     while (std::isspace(*cp)) ++cp;
-    string cmd = commentCleanup(string(cp));
+    string cmd = commentCleanup(string{cp});
     // cmd now is comment without extra spaces and "verilator" prefix
 
     if (synth) {
@@ -541,7 +543,7 @@ void V3PreProcImp::unputString(const string& strg) {
     // so instead we scan from a temporary buffer, then on EOF return.
     // This is also faster than the old scheme, amazingly.
     if (VL_UNCOVERABLE(m_lexp->m_bufferState != m_lexp->currentBuffer())) {
-        fatalSrc("bufferStack missing current buffer; will return incorrectly");
+        v3fatalSrc("bufferStack missing current buffer; will return incorrectly");
         // Hard to debug lost text as won't know till much later
     }
     m_lexp->scanBytes(strg);
@@ -952,15 +954,15 @@ void V3PreProcImp::debugToken(int tok, const char* cmtp) {
     if (debug() >= 5) {
         string buf = string(yyourtext(), yyourleng());
         string::size_type pos;
-        while ((pos = buf.find('\n')) != string::npos) { buf.replace(pos, 1, "\\n"); }
-        while ((pos = buf.find('\r')) != string::npos) { buf.replace(pos, 1, "\\r"); }
+        while ((pos = buf.find('\n')) != string::npos) buf.replace(pos, 1, "\\n");
+        while ((pos = buf.find('\r')) != string::npos) buf.replace(pos, 1, "\\r");
         const string flcol = m_lexp->m_tokFilelinep->asciiLineCol();
-        fprintf(stderr, "%s: %s %s %s(%d) dr%d:  <%d>%-10s: %s\n", flcol.c_str(), cmtp,
-                (m_off ? "of" : "on"), procStateName(state()), static_cast<int>(m_states.size()),
-                static_cast<int>(m_defRefs.size()), m_lexp->currentStartState(), tokenName(tok),
-                buf.c_str());
+        UINFO(0, flcol << ": " << cmtp << " " << (m_off ? "of" : "on") << " "
+                       << procStateName(state()) << "(" << static_cast<int>(m_states.size())
+                       << ") dr" << m_defRefs.size() << ":  <" << m_lexp->currentStartState()
+                       << ">" << tokenName(tok) << ": " << buf << endl);
         if (s_debugFileline >= 9) {
-            std::cerr << m_lexp->m_tokFilelinep->warnContextSecondary() << endl;
+            std::cout << m_lexp->m_tokFilelinep->warnContextSecondary() << endl;
         }
     }
 }
@@ -1091,7 +1093,7 @@ int V3PreProcImp::getStateToken() {
                     m_lexp->pushStateDefForm();
                     goto next_tok;
                 } else {  // LCOV_EXCL_LINE
-                    fatalSrc("Bad case\n");
+                    v3fatalSrc("Bad case\n");
                 }
                 goto next_tok;
             } else if (tok == VP_TEXT) {
@@ -1165,7 +1167,7 @@ int V3PreProcImp::getStateToken() {
             } else {
                 const string msg
                     = std::string{"Bad define text, unexpected "} + tokenName(tok) + "\n";
-                fatalSrc(msg);
+                v3fatalSrc(msg);
             }
             statePop();
             // DEFVALUE is terminated by a return, but lex can't return both tokens.
@@ -1179,7 +1181,7 @@ int V3PreProcImp::getStateToken() {
                 goto next_tok;
             } else {
                 if (VL_UNCOVERABLE(m_defRefs.empty())) {
-                    fatalSrc("Shouldn't be in DEFPAREN w/o active defref");
+                    v3fatalSrc("Shouldn't be in DEFPAREN w/o active defref");
                 }
                 const VDefineRef* const refp = &(m_defRefs.top());
                 error(std::string{"Expecting ( to begin argument list for define reference `"}
@@ -1190,7 +1192,7 @@ int V3PreProcImp::getStateToken() {
         }
         case ps_DEFARG: {
             if (VL_UNCOVERABLE(m_defRefs.empty())) {
-                fatalSrc("Shouldn't be in DEFARG w/o active defref");
+                v3fatalSrc("Shouldn't be in DEFARG w/o active defref");
             }
             VDefineRef* refp = &(m_defRefs.top());
             refp->nextarg(refp->nextarg() + m_lexp->m_defValue);
@@ -1217,7 +1219,7 @@ int V3PreProcImp::getStateToken() {
                     if (state()
                         == ps_JOIN) {  // Handle {left}```FOO(ARG) where `FOO(ARG) might be empty
                         if (VL_UNCOVERABLE(m_joinStack.empty())) {
-                            fatalSrc("`` join stack empty, but in a ``");
+                            v3fatalSrc("`` join stack empty, but in a ``");
                         }
                         const string lhs = m_joinStack.top();
                         m_joinStack.pop();
@@ -1307,7 +1309,7 @@ int V3PreProcImp::getStateToken() {
         case ps_JOIN: {
             if (tok == VP_SYMBOL || tok == VP_TEXT) {
                 if (VL_UNCOVERABLE(m_joinStack.empty())) {
-                    fatalSrc("`` join stack empty, but in a ``");
+                    v3fatalSrc("`` join stack empty, but in a ``");
                 }
                 const string lhs = m_joinStack.top();
                 m_joinStack.pop();
@@ -1363,7 +1365,7 @@ int V3PreProcImp::getStateToken() {
                 goto next_tok;
             }
         }
-        default: fatalSrc("Bad case\n");
+        default: v3fatalSrc("Bad case\n");
         }
         // Default is to do top level expansion of some tokens
         switch (tok) {
@@ -1445,7 +1447,7 @@ int V3PreProcImp::getStateToken() {
                         // Just output the substitution
                         if (state() == ps_JOIN) {  // Handle {left}```FOO where `FOO might be empty
                             if (VL_UNCOVERABLE(m_joinStack.empty())) {
-                                fatalSrc("`` join stack empty, but in a ``");
+                                v3fatalSrc("`` join stack empty, but in a ``");
                             }
                             const string lhs = m_joinStack.top();
                             m_joinStack.pop();
@@ -1481,7 +1483,7 @@ int V3PreProcImp::getStateToken() {
                     goto next_tok;
                 }
             }
-            fatalSrc("Bad case\n");  // FALLTHRU
+            v3fatalSrc("Bad case\n");  // FALLTHRU
             goto next_tok;  // above fatal means unreachable, but fixes static analysis warning
         }
         case VP_ERROR: {
@@ -1518,7 +1520,7 @@ int V3PreProcImp::getStateToken() {
         case VP_DEFFORM:  // Handled by state=ps_DEFFORM;
         case VP_DEFVALUE:  // Handled by state=ps_DEFVALUE;
         default:  // LCOV_EXCL_LINE
-            fatalSrc(std::string{"Internal error: Unexpected token "} + tokenName(tok) + "\n");
+            v3fatalSrc(std::string{"Internal error: Unexpected token "} + tokenName(tok) + "\n");
             break;  // LCOV_EXCL_LINE
         }
         return tok;
@@ -1538,8 +1540,7 @@ int V3PreProcImp::getFinalToken(string& buf) {
     if (false && debug() >= 5) {
         const string bufcln = V3PreLex::cleanDbgStrg(buf);
         const string flcol = m_lexp->m_tokFilelinep->asciiLineCol();
-        fprintf(stderr, "%s: FIN:      %-10s: %s\n", flcol.c_str(), tokenName(tok),
-                bufcln.c_str());
+        UINFO(0, flcol << ": FIN:      " << tokenName(tok) << ": " << bufcln << endl);
     }
     // Track `line
     const char* bufp = buf.c_str();
@@ -1553,8 +1554,9 @@ int V3PreProcImp::getFinalToken(string& buf) {
                 = (m_lexp->m_tokFilelinep->lastLineno() - m_finFilelinep->lastLineno())) {
                 if (debug() >= 5) {
                     const string flcol = m_lexp->m_tokFilelinep->asciiLineCol();
-                    fprintf(stderr, "%s: FIN: readjust, fin at %d  request at %d\n", flcol.c_str(),
-                            m_finFilelinep->lastLineno(), m_lexp->m_tokFilelinep->lastLineno());
+                    UINFO(0, flcol << ": FIN: readjust, fin at " << m_finFilelinep->lastLineno()
+                                   << "  request at " << m_lexp->m_tokFilelinep->lastLineno()
+                                   << endl);
                 }
                 m_finFilelinep->filename(m_lexp->m_tokFilelinep->filename());
                 m_finFilelinep->lineno(m_lexp->m_tokFilelinep->lastLineno());
@@ -1563,7 +1565,7 @@ int V3PreProcImp::getFinalToken(string& buf) {
                     // Output stream is behind, send newlines to get back in sync
                     // (Most likely because we're completing a disabled `endif)
                     if (m_preprocp->keepWhitespace()) {
-                        buf = string(outBehind, '\n');
+                        buf = std::string(outBehind, '\n');  // () for char repeat
                         return VP_TEXT;
                     }
                 } else {
@@ -1598,8 +1600,7 @@ string V3PreProcImp::getline() {
         if (debug() >= 5) {
             const string bufcln = V3PreLex::cleanDbgStrg(buf);
             const string flcol = m_lexp->m_tokFilelinep->asciiLineCol();
-            fprintf(stderr, "%s: GETFETC:  %-10s: %s\n", flcol.c_str(), tokenName(tok),
-                    bufcln.c_str());
+            UINFO(0, flcol << ": GETFETC:  " << tokenName(tok) << ": " << bufcln << endl);
         }
         if (tok == VP_EOF) {
             // Add a final newline, if the user forgot the final \n.
@@ -1619,7 +1620,7 @@ string V3PreProcImp::getline() {
     if (debug() >= 4) {
         const string lncln = V3PreLex::cleanDbgStrg(theLine);
         const string flcol = m_lexp->m_tokFilelinep->asciiLineCol();
-        fprintf(stderr, "%s: GETLINE:  %s\n", flcol.c_str(), lncln.c_str());
+        UINFO(0, flcol << ": GETLINE:  " << lncln << endl);
     }
     return theLine;
 }

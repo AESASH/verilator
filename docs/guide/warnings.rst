@@ -12,16 +12,30 @@ Disabling Warnings
 
 Warnings may be disabled in multiple ways:
 
-#. Disable the warning in the source code.  When the warning is printed, it
-   will include a warning code.  Surround the offending line with a
-   :code:`/*verilator&32;lint_off*/` and :code:`/*verilator&32;lint_on*/`
-   metacomment pair:
+#. Disable the warning globally by invoking Verilator with the
+   :code:`-Wno-{warning-code}` option.
+
+   Global disables should be avoided, as they removes all checking across
+   the source files, and prevents other users from compiling the sources
+   without knowing the magic set of disables needed to compile those
+   sources successfully.
+
+#. Disable the warning in the design source code.  When the warning is
+   printed, it will include a warning code.  Surround the offending line
+   with a :code:`/*verilator&32;lint_off*/` and
+   :code:`/*verilator&32;lint_on*/` metacomment pair:
 
    .. code-block:: sv
 
          // verilator lint_off UNSIGNED
          if (`DEF_THAT_IS_EQ_ZERO <= 3) $stop;
          // verilator lint_on UNSIGNED
+
+
+   A lint_off in the design source code will propagate down to any child
+   files (files later included by the file with the lint_off), but will not
+   propagate upwards to any parent file (file that included the file with
+   the lint_off).
 
 #. Disable the warning using :ref:`Configuration Files` with a
    :option:`lint_off` command.  This is useful when a script suppresses
@@ -31,12 +45,6 @@ Warnings may be disabled in multiple ways:
    .. code-block:: sv
 
          lint_off -rule UNSIGNED -file "*/example.v" -line 1
-
-#. Disable the warning globally invoking Verilator with the
-   :code:`-Wno-{warning-code}` option.  This should be avoided, as it
-   removes all checking across the designs, and prevents other users from
-   compiling your code without knowing the magic set of disables needed to
-   compile your design successfully.
 
 
 Error And Warning Format
@@ -670,6 +678,52 @@ List Of Warnings
    used as a clock.
 
 
+.. option:: GENUNNAMED
+
+   Warns that a generate block was unnamed and "genblk" will be used per
+   IEEE.
+
+   The potential issue is that adding additional generate blocks will
+   renumber the assigned names, which may cause eventual problems with
+   synthesis constraints or other tools that depend on hierarchical paths
+   remaining consistent.
+
+   Blocks that are empty may not be reported with this warning, as no
+   scopes are created for empty blocks, so there is no harm in having them
+   unnamed.
+
+   Disabled by default as this is a code-style warning; it will simulate
+   correctly.
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 2
+
+         generate
+            if (PARAM == 1) begin  //<--- Warning
+            end
+
+   Results in:
+
+   .. code-block::
+
+         %Warning-GENUNNAMED: example.v:2:9: Unnamed generate block (IEEE 1800-2017 27.6)
+
+   To fix this assign a label (often with the naming convention prefix of
+   :code:`gen_` or :code:`g_`), for example:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 2
+
+         generate
+            if (PARAM == 1) begin : gen_param_1  //<--- Repaired
+            end
+
+   Other tools with similar warnings: Verible's generate-label, "All
+   generate block statements must have a label."
+
+
 .. option:: HIERBLOCK
 
    Warns that the top module is marked as a hierarchy block by the
@@ -876,6 +930,102 @@ List Of Warnings
    Ignoring this warning will only suppress the lint check; it will
    simulate correctly.
 
+.. option:: LIFETIME
+
+   Error when a variable is referenced in a process that can outlive the process
+   in which it was declared. This can happen when using 'fork..join_none' or
+   'fork..join_any' blocks, which spawn process that can outlive their parents.
+   This error occurs only when Verilator can't replace the reference with a
+   reference to copy of this variable, local to the forked process. For example:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 3
+
+         task foo(int local_var);
+            fork
+               #10 local_var++;
+               #20 $display("local_var = %d", local_var);
+            join_none
+         endtask
+
+   In the example above 'local_var' exists only within scope of 'foo', once foo
+   finishes, the stack frame containing 'i' gets removed. However, the process
+   forked from foo continues, as it contains a delay. After 10 units of time
+   pass, this process attempts to modify 'local_var'. However, this variable no
+   longer exits. It can't be made local to the forked process upon spawning, because
+   it's modified and can be referenced somewhere else, for example in the other
+   forked process, that was delayed by 20 units of time in this example. Thus,
+   there's no viable stack allocation for it.
+
+   In order to fix it, if the intent is not to share the variable's state outside
+   of the process, then create a local copy of the variable.
+
+   For example:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 4
+
+         task foo(int local_var);
+            fork
+               #10 begin
+                  int forked_var = local_var;
+                  forked_var++;
+               end
+               #20 begin
+                  // Note that we are going to print the original value here,
+                  // as `forked_var`is a local copy that was initialized while
+                  // `foo` was still alive.
+                  int forked_var = local_var;
+                  $display("forked_var = %d", forked_var)
+               end
+            join_none
+         endtask
+
+   If you need to share its state, another strategy is to ensure it's allocated
+   statically:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 1
+
+         int static_var;
+
+         task foo();
+            fork
+               #10 static_var++;
+               #20 $display("static_var = %d", static_var);
+            join_none
+         endtask
+
+   However, if you need to be able to instantiate at runtime, the solution would be to
+   wrap it in an object, since the forked process can hold a reference to that object
+   and ensure that the variable stays alive this way:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 2
+
+         class Wrapper;
+            int m_var;
+
+            // Here we implicitly hold a reference to `this`
+            task foo();
+               fork
+                  #10 m_var++;
+                  #20 $display("this.m_var = %d", m_var);
+               join_none
+            endtask
+         endclass
+
+         // Here we explicitly hold a handle to an object
+         task bar(Wrapper wrapper);
+            fork
+               #10 wrapper.m_var++;
+               #20 $display("wrapper.m_var = %d", wrapper.m_var);
+            join_none
+         endtask
 
 .. option:: LITENDIAN
 
@@ -895,6 +1045,51 @@ List Of Warnings
 
    Warns that minimum, typical, and maximum delay expressions are currently
    unsupported. Verilator uses only the typical delay value.
+
+
+.. option:: MISINDENT
+
+   Warns that the indentation of a statement is misleading, suggesting the
+   statement is part of a previous :code:`if` or :code:`while` block while
+   it is not.
+
+   Verilator suppresses this check when there is an inconsistent mix of
+   spaces and tabs, as it cannot ensure the width of tabs.  Verilator also
+   ignores blocks with :code:`begin`/:code:`end`, as the :code:`end`
+   visually indicates the earlier statement's end.
+
+   Ignoring this warning will only suppress the lint check; it will
+   simulate correctly.
+
+   For example
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 3
+
+         if (something)
+            statement_in_if;
+            statement_not_in_if;  //<--- Warning
+
+   Results in:
+
+   .. code-block::
+
+         %Warning-MISINDENT: example.v:3:9: Misleading indentation
+
+   To fix this repair the indentation to match the correct earlier
+   statement, for example:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 3
+
+         if (something)
+            statement_in_if;
+         statement_not_in_if;  //<--- Repaired
+
+   Other tools with similar warnings: GCC -Wmisleading-indentation,
+   clang-tidy readability-misleading-indentation.
 
 
 .. option:: MODDUP
@@ -979,7 +1174,7 @@ List Of Warnings
 
    Warns that a feature requires a newer standard of Verilog or SystemVerilog
    than the one specified by the :vlopt:`--language` option. For example, unsized
-   unbased literals (`'0`, `'1`, `'z`, `'x`) require 1800-2005 or later.
+   unbased literals (`'0`, `'1`, `'z`, `'x`) require IEEE 1800-2005 or later.
 
    To avoid this warning, use a Verilog or SystemVerilog standard that
    supports the feature. Alternatively, modify your code to use a different
@@ -1173,7 +1368,10 @@ List Of Warnings
 
 .. option:: RANDC
 
-   Warns that the :code:`randc` keyword is unsupported and being converted
+   Historical, never issued since version 5.018, when :code:`randc` became
+   fully supported.
+
+   Warned that the :code:`randc` keyword was unsupported and was converted
    to :code:`rand`.
 
 
@@ -1314,6 +1512,39 @@ List Of Warnings
    Ignoring this warning may make Verilator simulations differ from other
    simulators if the increased precision of :code:`real` affects the
    modeled values, or DPI calls.
+
+
+.. option:: SIDEEFFECT
+
+   Warns that an expression has a side effect that might not properly be
+   executed by Verilator.
+
+   This often represents a bug in Verilator, as opposed to a bad code
+   construct, however the Verilog code can typically be changed to avoid
+   the warning.
+
+   Faulty example:
+
+   .. code-block:: sv
+      :linenos:
+      :emphasize-lines: 1
+
+         x = y[a++];
+
+   This example warns because Verilator does not currently handle side
+   effects inside array subscripts; the a++ may be executed multiple times.
+
+   Rewrite the code to avoid expression side effects, typically by using a
+   temporary:
+
+   .. code-block:: sv
+      :linenos:
+
+         temp = a++;
+         x = y[temp];
+
+   Ignoring this warning may make Verilator simulations differ from other
+   simulators.
 
 
 .. option:: SPLITVAR
@@ -1803,10 +2034,14 @@ List Of Warnings
 
    .. code-block:: sv
 
-         wait(0);  // Blocks forever
+         wait(1);  // Blocks forever
 
    Warns that a `wait` statement awaits a constant condition, which means it
    either blocks forever or never blocks.
+
+   As a special case `wait(0)` with the literal constant `0` (as opposed to
+   something that elaborates to zero), does not warn, as it is presumed the
+   code is making the intent clear.
 
 
 .. option:: WIDTH
@@ -1852,17 +2087,18 @@ List Of Warnings
 
    .. include:: ../../docs/gen/ex_WIDTHEXPAND_1_fixed.rst
 
+
 .. option:: WIDTHTRUNC
 
-   A more granular WIDTH warning, for when a value is truncated
+   A more granular WIDTH warning, for when a value is truncated.
 
 .. option:: WIDTHEXPAND
 
-   A more granular WIDTH warning, for when a value is zero expanded
+   A more granular WIDTH warning, for when a value is zero expanded.
 
 .. option:: WIDTHXZEXPAND
 
-   A more granular WIDTH warning, for when a value is X/Z expanded
+   A more granular WIDTH warning, for when a value is X/Z expanded.
 
 .. option:: WIDTHCONCAT
 

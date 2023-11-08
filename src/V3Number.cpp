@@ -14,13 +14,9 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstMT.h"
 
 #include "V3Number.h"
-
-#include "V3Ast.h"
-#include "V3Global.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -76,7 +72,7 @@ constexpr int MAX_SPRINTF_DOUBLE_SIZE
 //======================================================================
 // Errors
 
-void V3Number::v3errorEnd(const std::ostringstream& str) const VL_REQUIRES(V3Error::s().m_mutex) {
+void V3Number::v3errorEnd(const std::ostringstream& str) const VL_RELEASE(V3Error::s().m_mutex) {
     std::ostringstream nsstr;
     nsstr << str.str();
     if (m_nodep) {
@@ -84,12 +80,12 @@ void V3Number::v3errorEnd(const std::ostringstream& str) const VL_REQUIRES(V3Err
     } else if (m_fileline) {
         m_fileline->v3errorEnd(nsstr);
     } else {
-        V3Error::s().v3errorEnd(nsstr);
+        V3Error::v3errorEnd(nsstr);
     }
 }
 
 void V3Number::v3errorEndFatal(const std::ostringstream& str) const
-    VL_REQUIRES(V3Error::s().m_mutex) {
+    VL_RELEASE(V3Error::s().m_mutex) {
     v3errorEnd(str);
     assert(0);  // LCOV_EXCL_LINE
     VL_UNREACHABLE;
@@ -256,8 +252,8 @@ void V3Number::create(const char* sourcep) {
                                 << width() << " bit number: " << sourcep << '\n'
                                 << ((!sized() && !warned++) ? (
                                         V3Error::warnMore() + "... As that number was unsized"
-                                        + " ('d...) it is limited to 32 bits (IEEE 1800-2017 "
-                                          "5.7.1)\n"
+                                        + " ('d...) it is limited to 32 bits"
+                                          " (IEEE 1800-2017 5.7.1)\n"
                                         + V3Error::warnMore() + "... Suggest adding a size to it.")
                                                             : ""));
                         while (*(cp + 1)) cp++;  // Skip ahead so don't get multiple warnings
@@ -314,8 +310,7 @@ void V3Number::create(const char* sourcep) {
 
             case 'o':
             case 'c': {
-                switch (std::tolower(*cp)) {
-                // clang-format off
+                switch (std::tolower(*cp)) {  // clang-format off
                 case '0': setBit(obit++, 0); setBit(obit++, 0);  setBit(obit++, 0);  break;
                 case '1': setBit(obit++, 1); setBit(obit++, 0);  setBit(obit++, 0);  break;
                 case '2': setBit(obit++, 0); setBit(obit++, 1);  setBit(obit++, 0);  break;
@@ -335,8 +330,7 @@ void V3Number::create(const char* sourcep) {
             }
 
             case 'h': {
-                switch (std::tolower(*cp)) {
-                    // clang-format off
+                switch (std::tolower(*cp)) {  // clang-format off
                 case '0': setBit(obit++,0); setBit(obit++,0); setBit(obit++,0); setBit(obit++,0); break;
                 case '1': setBit(obit++,1); setBit(obit++,0); setBit(obit++,0); setBit(obit++,0); break;
                 case '2': setBit(obit++,0); setBit(obit++,1); setBit(obit++,0); setBit(obit++,0); break;
@@ -511,6 +505,7 @@ string V3Number::ascii(bool prefixed, bool cleanVerilog) const VL_MT_STABLE {
             out << "%E-bad-width-double";  // LCOV_EXCL_LINE
         } else {
             out << toDouble();
+            if (toDouble() == floor(toDouble())) out << ".0";
         }
         return out.str();
     } else if (isString()) {
@@ -1866,12 +1861,15 @@ V3Number& V3Number::opAdd(const V3Number& lhs, const V3Number& rhs) {
     if (lhs.isFourState() || rhs.isFourState()) return setAllBitsX();
     setZero();
     // Addem
-    int carry = 0;
-    for (int bit = 0; bit < width(); bit++) {
-        const int sum = ((lhs.bitIs1(bit) ? 1 : 0) + (rhs.bitIs1(bit) ? 1 : 0) + carry);
-        if (sum & 1) setBit(bit, 1);
-        carry = (sum >= 2);
+    uint64_t carry = 0;
+    for (int word = 0; word < words(); word++) {
+        const uint64_t lwordval = lhs.m_data.num()[word].m_value;
+        const uint64_t rwordval = rhs.m_data.num()[word].m_value;
+        const uint64_t sum = lwordval + rwordval + carry;
+        m_data.num()[word].m_value = sum & 0xffffffffULL;
+        carry = sum > 0xffffffffULL;
     }
+    opCleanThis();  // Just in case it produced extra bits in result
     return *this;
 }
 V3Number& V3Number::opSub(const V3Number& lhs, const V3Number& rhs) {
@@ -2214,8 +2212,9 @@ V3Number& V3Number::opAssignNonXZ(const V3Number& lhs, bool ignoreXZ) {
         } else if (VL_UNLIKELY(lhs.isString())) {
             // Non-compatible types, see also opAToN()
             setZero();
+        } else if (lhs.isDouble()) {
+            setDouble(lhs.toDouble());
         } else {
-            // Also handles double as is just bits
             for (int bit = 0; bit < this->width(); bit++) {
                 setBit(bit, ignoreXZ ? lhs.bitIs1(bit) : lhs.bitIs(bit));
             }
@@ -2385,19 +2384,23 @@ V3Number& V3Number::opRToIRoundS(const V3Number& lhs) {
 V3Number& V3Number::opRealToBits(const V3Number& lhs) {
     NUM_ASSERT_OP_ARGS1(lhs);
     NUM_ASSERT_DOUBLE_ARGS1(lhs);
-    // Conveniently our internal format is identical so we can copy bits...
     if (lhs.width() != 64 || width() != 64) v3fatalSrc("Real operation on wrong sized number");
-    m_data.setLogic();
-    opAssign(lhs);
-    return *this;
+    union {
+        double m_d;
+        uint64_t m_v;
+    } u;
+    u.m_d = lhs.toDouble();
+    return setQuad(u.m_v);
 }
 V3Number& V3Number::opBitsToRealD(const V3Number& lhs) {
     NUM_ASSERT_OP_ARGS1(lhs);
-    // Conveniently our internal format is identical so we can copy bits...
     if (lhs.width() != 64 || width() != 64) v3fatalSrc("Real operation on wrong sized number");
-    m_data.setDouble();
-    opAssign(lhs);
-    return *this;
+    union {
+        double m_d;
+        uint64_t m_v;
+    } u;
+    u.m_v = lhs.toUQuad();
+    return setDouble(u.m_d);
 }
 V3Number& V3Number::opNegateD(const V3Number& lhs) {
     NUM_ASSERT_OP_ARGS1(lhs);

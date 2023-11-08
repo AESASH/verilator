@@ -35,7 +35,6 @@ set(HEADERS
     V3Assert.h
     V3AssertPre.h
     V3Ast.h
-    V3AstConstOnly.h
     V3AstInlines.h
     V3AstNodeDType.h
     V3AstNodeExpr.h
@@ -44,9 +43,10 @@ set(HEADERS
     V3Begin.h
     V3Branch.h
     V3Broken.h
+    V3CCtors.h
+    V3CUse.h
     V3Case.h
     V3Cast.h
-    V3CCtors.h
     V3Class.h
     V3Clean.h
     V3Clock.h
@@ -56,7 +56,6 @@ set(HEADERS
     V3Const.h
     V3Coverage.h
     V3CoverageJoin.h
-    V3CUse.h
     V3Dead.h
     V3Delayed.h
     V3Depth.h
@@ -82,6 +81,7 @@ set(HEADERS
     V3File.h
     V3FileLine.h
     V3Force.h
+    V3Fork.h
     V3FunctionTraits.h
     V3Gate.h
     V3Global.h
@@ -95,6 +95,7 @@ set(HEADERS
     V3Inline.h
     V3Inst.h
     V3InstrCount.h
+    V3Interface.h
     V3LangCode.h
     V3LanguageWords.h
     V3Life.h
@@ -103,13 +104,16 @@ set(HEADERS
     V3LinkDot.h
     V3LinkInc.h
     V3LinkJump.h
-    V3LinkLevel.h
     V3LinkLValue.h
+    V3LinkLevel.h
     V3LinkParse.h
     V3LinkResolve.h
     V3List.h
     V3Localize.h
+    V3MemberMap.h
     V3MergeCond.h
+    V3Mutex.h
+    V3Name.h
     V3Name.h
     V3Number.h
     V3OptionParser.h
@@ -125,13 +129,16 @@ set(HEADERS
     V3ParseSym.h
     V3Partition.h
     V3PartitionGraph.h
+    V3PchAstMT.h
+    V3PchAstNoMT.h
     V3PreLex.h
-    V3Premit.h
     V3PreProc.h
     V3PreShell.h
+    V3Premit.h
     V3ProtectLib.h
     V3Randomize.h
     V3Reloop.h
+    V3Rtti.h
     V3Sched.h
     V3Scope.h
     V3Scoreboard.h
@@ -147,14 +154,15 @@ set(HEADERS
     V3String.h
     V3Subst.h
     V3SymTable.h
+    V3TSP.h
     V3Table.h
     V3Task.h
     V3ThreadPool.h
+    V3ThreadSafety.h
     V3Timing.h
     V3Trace.h
     V3TraceDecl.h
     V3Tristate.h
-    V3TSP.h
     V3Undriven.h
     V3UniqueNames.h
     V3Unknown.h
@@ -163,6 +171,7 @@ set(HEADERS
     V3Waiver.h
     V3Width.h
     V3WidthCommit.h
+    V3WidthRemove.h
     VlcBucket.h
     VlcOptions.h
     VlcPoint.h
@@ -218,6 +227,7 @@ set(COMMON_SOURCES
     V3EmitCMain.cpp
     V3EmitCMake.cpp
     V3EmitCModel.cpp
+    V3EmitCPch.cpp
     V3EmitCSyms.cpp
     V3EmitMk.cpp
     V3EmitV.cpp
@@ -227,6 +237,7 @@ set(COMMON_SOURCES
     V3File.cpp
     V3FileLine.cpp
     V3Force.cpp
+    V3Fork.cpp
     V3Gate.cpp
     V3Global.cpp
     V3Graph.cpp
@@ -240,6 +251,7 @@ set(COMMON_SOURCES
     V3Inline.cpp
     V3Inst.cpp
     V3InstrCount.cpp
+    V3Interface.cpp
     V3Life.cpp
     V3LifePost.cpp
     V3LinkCells.cpp
@@ -293,6 +305,7 @@ set(COMMON_SOURCES
     V3VariableOrder.cpp
     V3Waiver.cpp
     V3Width.cpp
+    V3WidthCommit.cpp
     V3WidthSel.cpp
     V3ParseImp.cpp
     V3ParseGrammar.cpp
@@ -322,7 +335,7 @@ file(TO_NATIVE_PATH ${srcdir}/../bin/verilator_includer VERILATOR_INCLUDER)
 file(TO_NATIVE_PATH ${srcdir}/vlcovgen VLCOVGEN)
 file(TO_NATIVE_PATH ${srcdir}/config_rev CONFIG_REV)
 
-configure_file(config_build.h.in config_build.h @ONLY)
+configure_file(config_package.h.in config_package.h @ONLY)
 
 add_custom_command(
     OUTPUT V3Ast__gen_forward_class_decls.h V3Dfg__gen_forward_class_decls.h
@@ -414,7 +427,7 @@ foreach(astgen_name ${ASTGENERATED_NAMES})
         MAIN_DEPENDENCY ${astgen_name}.cpp
         DEPENDS ${ASTGEN} V3Ast.h
         COMMAND ${PYTHON3} ARGS
-            ${ASTGEN} -I"${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --dfgdef V3DfgVertices.h ${astgen_name}.cpp
+            ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --dfgdef V3DfgVertices.h ${astgen_name}.cpp
     )
     list(APPEND GENERATED_FILES ${astgen_name}__gen.cpp)
 endforeach()
@@ -453,7 +466,7 @@ set_target_properties(${verilator} PROPERTIES
     #UNITY_BUILD $<IF:$<CONFIG:DEBUG>,FALSE,${CMAKE_UNITY_BUILD}>
     MSVC_RUNTIME_LIBRARY  MultiThreaded$<IF:$<CONFIG:Release>,,DebugDLL>
     #JOB_POOL_LINK         one_job      # Linking takes lots of resources
-    INTERPROCEDURAL_OPTIMIZATION_RELEASE  TRUE
+    INTERPROCEDURAL_OPTIMIZATION_RELEASE  $<IF:MINGW,FALSE,TRUE>
 )
 
 add_dependencies(${verilator}
@@ -488,6 +501,14 @@ target_include_directories(${verilator}
 )
 
 if (WIN32)
+    if(MINGW)
+        target_compile_options(${verilator} PRIVATE -Wa,-mbig-obj)
+        target_link_options(${verilator} PRIVATE -Wl,--stack,10000000 -mconsole -lcomctl32 -DWIN_32_LEAN_AND_MEAN)
+    else()
+        target_compile_options(${verilator} PRIVATE /bigobj)
+        target_link_options(${verilator} PRIVATE /STACK:10000000)
+    endif()
+
     target_compile_definitions(${verilator} PRIVATE
         YY_NO_UNISTD_H
     )

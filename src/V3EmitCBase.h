@@ -22,7 +22,7 @@
 
 #include "V3Ast.h"
 #include "V3File.h"
-#include "V3Global.h"
+#include "V3ThreadSafety.h"
 
 #include <cmath>
 #include <cstdarg>
@@ -55,6 +55,7 @@ public:
         return className + "* const __restrict vlSelf VL_ATTR_UNUSED = static_cast<" + className
                + "*>(voidSelf);\n";
     }
+    static string pchClassName() VL_MT_STABLE { return v3Global.opt.prefix() + "__pch"; }
     static string symClassName() VL_MT_STABLE {
         return v3Global.opt.prefix() + "_" + VIdProtect::protect("_Syms");
     }
@@ -62,7 +63,10 @@ public:
     static string symClassAssign() {
         return symClassName() + "* const __restrict vlSymsp VL_ATTR_UNUSED = vlSelf->vlSymsp;\n";
     }
-    static string prefixNameProtect(const AstNode* nodep) VL_MT_STABLE {  // C++ name with prefix
+    static string topClassName() VL_MT_SAFE {  // Return name of top wrapper module
+        return v3Global.opt.prefix();
+    }
+    static string prefixNameProtect(const AstNode* nodep) {  // C++ name with prefix
         return v3Global.opt.modPrefix() + "_" + VIdProtect::protect(nodep->name());
     }
     static bool isAnonOk(const AstVar* varp) {
@@ -104,9 +108,6 @@ public:
         return v3Global.opt.protectIds() ? "" : in;
     }
     static string funcNameProtect(const AstCFunc* nodep, const AstNodeModule* modp = nullptr);
-    static string topClassName() VL_MT_SAFE {  // Return name of top wrapper module
-        return v3Global.opt.prefix();
-    }
     static AstCFile* newCFile(const string& filename, bool slow, bool source);
     static AstCFile* createCFile(const string& filename, bool slow, bool source) VL_MT_SAFE;
     string cFuncArgs(const AstCFunc* nodep);
@@ -117,11 +118,12 @@ public:
     static void forModCUse(const AstNodeModule* modp, VUseType useType, F action) {
         for (AstNode* itemp = modp->stmtsp(); itemp; itemp = itemp->nextp()) {
             if (AstCUse* const usep = VN_CAST(itemp, CUse)) {
-                if (usep->useType() == useType) {
-                    if (usep->useType().isInclude()) {
+                if (usep->useType().containsAny(useType)) {
+                    if (usep->useType().containsAny(VUseType::INT_INCLUDE)) {
                         action("#include \"" + prefixNameProtect(usep) + ".h\"\n");
+                        continue;  // Forward declaration is not necessary
                     }
-                    if (usep->useType().isFwdClass()) {
+                    if (usep->useType().containsAny(VUseType::INT_FWD_CLASS)) {
                         action("class " + prefixNameProtect(usep) + ";\n");
                     }
                 }

@@ -30,7 +30,16 @@ void VlCoroutineHandle::resume() {
     // main process
     if (VL_LIKELY(m_coro)) {
         VL_DEBUG_IF(VL_DBG_MSGF("             Resuming: "); dump(););
-        m_coro();
+        if (m_process) {  // If process state is managed with std::process
+            if (m_process->state() == VlProcess::KILLED) {
+                m_coro.destroy();
+            } else {
+                m_process->state(VlProcess::RUNNING);
+                m_coro();
+            }
+        } else {
+            m_coro();
+        }
         m_coro = nullptr;
     }
 }
@@ -144,11 +153,12 @@ void VlTriggerScheduler::dump(const char* eventDescription) const {
 // VlDynamicTriggerScheduler:: Methods
 
 bool VlDynamicTriggerScheduler::evaluate() {
+    m_anyTriggered = false;
     VL_DEBUG_IF(dump(););
     std::swap(m_suspended, m_evaluated);
     for (auto& coro : m_evaluated) coro.resume();
     m_evaluated.clear();
-    return !m_triggered.empty();
+    return m_anyTriggered;
 }
 
 void VlDynamicTriggerScheduler::doPostUpdates() {

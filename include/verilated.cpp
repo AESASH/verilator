@@ -320,7 +320,7 @@ std::string VlRNG::get_randstate() const VL_MT_UNSAFE {
     const char* const stateCharsp = reinterpret_cast<const char*>(&m_state);
     static_assert(sizeof(m_state) == 16, "");
     std::string result{"R00112233445566770011223344556677"};
-    for (int i = 0; i < sizeof(m_state); ++i) {
+    for (size_t i = 0; i < sizeof(m_state); ++i) {
         result[1 + i * 2] = 'a' + ((stateCharsp[i] >> 4) & 15);
         result[1 + i * 2 + 1] = 'a' + (stateCharsp[i] & 15);
     }
@@ -332,7 +332,7 @@ void VlRNG::set_randstate(const std::string& state) VL_MT_UNSAFE {
         return;
     }
     char* const stateCharsp = reinterpret_cast<char*>(&m_state);
-    for (int i = 0; i < sizeof(m_state); ++i) {
+    for (size_t i = 0; i < sizeof(m_state); ++i) {
         stateCharsp[i]
             = (((state[1 + i * 2] - 'a') & 15) << 4) | ((state[1 + i * 2 + 1] - 'a') & 15);
     }
@@ -1896,6 +1896,12 @@ std::string VL_CVT_PACK_STR_NW(int lwords, const WDataInP lwp) VL_PURE {
     return std::string{destout, len};
 }
 
+std::string VL_CVT_PACK_STR_ND(const VlQueue<std::string>& q) VL_PURE {
+    std::string output;
+    for (const std::string& s : q) output += s;
+    return output;
+}
+
 std::string VL_PUTC_N(const std::string& lhs, IData rhs, CData ths) VL_PURE {
     std::string lstring = lhs;
     const int32_t rhs_s = rhs;  // To signed value
@@ -2088,7 +2094,7 @@ bool VlReadMem::get(QData& addrr, std::string& valuer) {
 
     if (VL_UNLIKELY(m_end != ~0ULL && m_addr <= m_end && !m_anyAddr)) {
         VL_WARN_MT(m_filename.c_str(), m_linenum, "",
-                   "$readmem file ended before specified final address (IEEE 2017 21.4)");
+                   "$readmem file ended before specified final address (IEEE 1800-2017 21.4)");
     }
 
     return false;  // EOF
@@ -2602,6 +2608,14 @@ VerilatedVirtualBase* VerilatedContext::threadPoolp() {
     return m_threadPool.get();
 }
 
+void VerilatedContext::prepareClone() { delete m_threadPool.release(); }
+
+VerilatedVirtualBase* VerilatedContext::threadPoolpOnClone() {
+    if (VL_UNLIKELY(m_threadPool)) m_threadPool.release();
+    m_threadPool = std::unique_ptr<VlThreadPool>(new VlThreadPool{this, m_threads - 1});
+    return m_threadPool.get();
+}
+
 VerilatedVirtualBase*
 VerilatedContext::enableExecutionProfiler(VerilatedVirtualBase* (*construct)(VerilatedContext&)) {
     if (!m_executionProfiler) m_executionProfiler.reset(construct(*this));
@@ -2696,14 +2710,11 @@ void VerilatedContextImp::commandArgVl(const std::string& arg) {
                         "Exiting due to command line argument (not an error)");
         } else if (arg == "+verilator+noassert") {
             assertOn(false);
-        } else if (commandArgVlUint64(arg, "+verilator+prof+exec+start+", u64)
-                   || commandArgVlUint64(arg, "+verilator+prof+threads+start+", u64)) {
+        } else if (commandArgVlUint64(arg, "+verilator+prof+exec+start+", u64)) {
             profExecStart(u64);
-        } else if (commandArgVlUint64(arg, "+verilator+prof+exec+window+", u64, 1)
-                   || commandArgVlUint64(arg, "+verilator+prof+threads+window+", u64, 1)) {
+        } else if (commandArgVlUint64(arg, "+verilator+prof+exec+window+", u64, 1)) {
             profExecWindow(u64);
-        } else if (commandArgVlString(arg, "+verilator+prof+exec+file+", str)
-                   || commandArgVlString(arg, "+verilator+prof+threads+file+", str)) {
+        } else if (commandArgVlString(arg, "+verilator+prof+exec+file+", str)) {
             profExecFilename(str);
         } else if (commandArgVlString(arg, "+verilator+prof+vlt+file+", str)) {
             profVltFilename(str);
@@ -3010,6 +3021,7 @@ void Verilated::endOfEval(VerilatedEvalMsgQueue* evalMsgQp) VL_MT_SAFE {
     // It should be ok to call into endOfEvalGuts, it returns immediately
     // if there are no transactions.
     VL_DEBUG_IF(VL_DBG_MSGF("End-of-eval cleanup\n"););
+    VerilatedThreadMsgQueue::flush(evalMsgQp);
     evalMsgQp->process();
 }
 

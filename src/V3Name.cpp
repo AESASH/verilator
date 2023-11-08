@@ -19,13 +19,10 @@
 //              Prepend __PVT__ to variable names
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Name.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
 #include "V3LanguageWords.h"
 
 VL_DEFINE_DEBUG_FUNCTIONS;
@@ -89,12 +86,7 @@ private:
             rename(nodep, false);
         }
     }
-    void visit(AstVarRef* nodep) override {
-        if (nodep->varp()) {
-            iterate(nodep->varp());
-            nodep->name(nodep->varp()->name());
-        }
-    }
+    void visit(AstVarRef* nodep) override { iterate(nodep->varp()); }
     void visit(AstCell* nodep) override {
         if (!nodep->user1()) {
             rename(nodep, (!nodep->modp()->modPublic() && !VN_IS(nodep->modp(), ClassPackage)));

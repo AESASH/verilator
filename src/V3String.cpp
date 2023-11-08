@@ -20,6 +20,7 @@
 #include "V3String.h"
 
 #include "V3Error.h"
+#include "V3FileLine.h"
 
 #ifndef V3ERROR_NO_GLOBAL_
 #include "V3Global.h"
@@ -130,6 +131,70 @@ string VString::escapeStringForPath(const string& str) {
     return result;
 }
 
+static int vl_decodexdigit(char c) {
+    return std::isdigit(c) ? c - '0' : std::tolower(c) - 'a' + 10;
+}
+
+string VString::unquoteSVString(const string& text, string& errOut) {
+    bool quoted = false;
+    string newtext;
+    newtext.reserve(text.size());
+    unsigned char octal_val = 0;
+    int octal_digits = 0;
+    for (string::const_iterator cp = text.begin(); cp != text.end(); ++cp) {
+        if (quoted) {
+            if (std::isdigit(*cp)) {
+                octal_val = octal_val * 8 + (*cp - '0');
+                if (++octal_digits == 3) {
+                    octal_digits = 0;
+                    quoted = false;
+                    newtext += octal_val;
+                }
+            } else {
+                if (octal_digits) {
+                    // Spec allows 1-3 digits
+                    octal_digits = 0;
+                    quoted = false;
+                    newtext += octal_val;
+                    --cp;  // Backup to reprocess terminating character as non-escaped
+                    continue;
+                }
+                quoted = false;
+                if (*cp == 'n') {
+                    newtext += '\n';
+                } else if (*cp == 'a') {
+                    newtext += '\a';  // SystemVerilog 3.1
+                } else if (*cp == 'f') {
+                    newtext += '\f';  // SystemVerilog 3.1
+                } else if (*cp == 'r') {
+                    newtext += '\r';
+                } else if (*cp == 't') {
+                    newtext += '\t';
+                } else if (*cp == 'v') {
+                    newtext += '\v';  // SystemVerilog 3.1
+                } else if (*cp == 'x' && std::isxdigit(cp[1])
+                           && std::isxdigit(cp[2])) {  // SystemVerilog 3.1
+                    newtext
+                        += static_cast<char>(16 * vl_decodexdigit(cp[1]) + vl_decodexdigit(cp[2]));
+                    cp += 2;
+                } else if (std::isalnum(*cp)) {
+                    errOut = "Unknown escape sequence: \\";
+                    errOut += *cp;
+                    break;
+                } else {
+                    newtext += *cp;
+                }
+            }
+        } else if (*cp == '\\') {
+            quoted = true;
+            octal_digits = 0;
+        } else {
+            newtext += *cp;
+        }
+    }
+    return newtext;
+}
+
 string VString::spaceUnprintable(const string& str) VL_PURE {
     string result;
     for (const char c : str) {
@@ -156,6 +221,15 @@ bool VString::isWhitespace(const string& str) {
         if (!std::isspace(c)) return false;
     }
     return true;
+}
+
+string::size_type VString::leadingWhitespaceCount(const string& str) {
+    string::size_type result = 0;
+    for (const char c : str) {
+        ++result;
+        if (!std::isspace(c)) break;
+    }
+    return result;
 }
 
 double VString::parseDouble(const string& str, bool* successp) {
@@ -199,6 +273,17 @@ bool VString::endsWith(const string& str, const string& suffix) {
     if (str.length() < suffix.length()) return false;
     return str.compare(str.length() - suffix.length(), suffix.length(), suffix) == 0;
 }
+string VString::aOrAn(const char* word) {
+    switch (word[0]) {
+    case '\0': return "";
+    case 'a':
+    case 'e':
+    case 'i':
+    case 'o':
+    case 'u': return "an";
+    default: return "a";
+    }
+}
 
 //######################################################################
 // VHashSha256
@@ -228,9 +313,8 @@ static void sha256Block(uint32_t* h, const uint32_t* chunk) VL_PURE {
     // Initialize working variables to current hash value
     for (unsigned i = 0; i < 8; i++) ah[i] = h[i];
     // Compression function main loop
+    uint32_t w[16] = {};
     for (unsigned i = 0; i < 4; ++i) {
-        uint32_t w[16];
-
         for (unsigned j = 0; j < 16; ++j) {
             if (i == 0) {
                 w[j] = *p++;

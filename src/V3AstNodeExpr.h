@@ -69,6 +69,8 @@ class AstNodeBiop VL_NOT_FINAL : public AstNodeExpr {
     // Binary expression
     // @astgen op1 := lhsp : AstNodeExpr
     // @astgen op2 := rhsp : AstNodeExpr
+    VIsCached m_purity;  // Pure state
+
 protected:
     AstNodeBiop(VNType t, FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp)
         : AstNodeExpr{t, fl} {
@@ -93,6 +95,11 @@ public:
     virtual bool stringFlavor() const { return false; }  // N flavor of nodes with both flavors?
     int instrCount() const override { return widthInstrs(); }
     bool same(const AstNode*) const override { return true; }
+    bool isPure() override;
+    const char* broken() const override;
+
+private:
+    bool getPurityRecurse() const { return lhsp()->isPure() && rhsp()->isPure(); }
 };
 class AstNodeBiCom VL_NOT_FINAL : public AstNodeBiop {
     // Binary expr with commutative properties
@@ -176,6 +183,7 @@ class AstNodeCCall VL_NOT_FINAL : public AstNodeExpr {
     // @astgen op2 := argsp : List[AstNodeExpr] // Note: op1 used by some sub-types only
     AstCFunc* m_funcp;
     string m_argTypes;
+    bool m_superReference = false;  // Called with super reference
 
 protected:
     AstNodeCCall(VNType t, FileLine* fl, AstCFunc* funcp, AstNodeExpr* argsp = nullptr)
@@ -191,13 +199,13 @@ public:
     const char* broken() const override;
     int instrCount() const override { return INSTR_COUNT_CALL; }
     bool same(const AstNode* samep) const override {
-        const AstNodeCCall* const asamep = static_cast<const AstNodeCCall*>(samep);
+        const AstNodeCCall* const asamep = VN_DBG_AS(samep, NodeCCall);
         return (funcp() == asamep->funcp() && argTypes() == asamep->argTypes());
     }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override;
-    bool isOutputter() const override { return !isPure(); }
+    bool isPure() override;
+    bool isOutputter() override { return !isPure(); }
     AstCFunc* funcp() const { return m_funcp; }
     void funcp(AstCFunc* funcp) { m_funcp = funcp; }
     void argTypes(const string& str) { m_argTypes = str; }
@@ -206,6 +214,8 @@ public:
     string emitVerilog() final override { V3ERROR_NA_RETURN(""); }
     string emitC() final override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const final override { return true; }
+    bool superReference() const { return m_superReference; }
+    void superReference(bool flag) { m_superReference = flag; }
 };
 class AstNodeFTaskRef VL_NOT_FINAL : public AstNodeExpr {
     // A reference to a task (or function)
@@ -214,11 +224,13 @@ class AstNodeFTaskRef VL_NOT_FINAL : public AstNodeExpr {
     // @astgen op3 := pinsp : List[AstNodeExpr]
     // @astgen op4 := scopeNamep : Optional[AstScopeName]
     AstNodeFTask* m_taskp = nullptr;  // [AfterLink] Pointer to task referenced
-    AstNodeModule* m_classOrPackagep = nullptr;  // Package hierarchy
+    AstNodeModule* m_classOrPackagep = nullptr;  // Class/package of the task
     string m_name;  // Name of variable
     string m_dotted;  // Dotted part of scope the name()ed task/func is under or ""
     string m_inlinedDots;  // Dotted hierarchy flattened out
     bool m_pli = false;  // Pli system call ($name)
+    VIsCached m_purity;  // Pure state
+
 protected:
     AstNodeFTaskRef(VNType t, FileLine* fl, AstNode* namep, AstNodeExpr* pinsp)
         : AstNodeExpr{t, fl} {
@@ -249,11 +261,14 @@ public:
     void classOrPackagep(AstNodeModule* nodep) { m_classOrPackagep = nodep; }
     bool pli() const { return m_pli; }
     void pli(bool flag) { m_pli = flag; }
-    bool isPure() const override;
+    bool isPure() override;
 
     string emitVerilog() final override { V3ERROR_NA_RETURN(""); }
     string emitC() final override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const final override { V3ERROR_NA_RETURN(true); }
+
+private:
+    bool getPurityRecurse() const;
 };
 class AstNodePreSel VL_NOT_FINAL : public AstNodeExpr {
     // Something that becomes an AstSel
@@ -261,6 +276,8 @@ class AstNodePreSel VL_NOT_FINAL : public AstNodeExpr {
     // @astgen op2 := rhsp : AstNodeExpr
     // @astgen op3 := thsp : Optional[AstNodeExpr]
     // @astgen op4 := attrp : Optional[AstAttrOf]
+    VIsCached m_purity;  // Pure state
+
 protected:
     AstNodePreSel(VNType t, FileLine* fl, AstNodeExpr* fromp, AstNodeExpr* rhsp, AstNodeExpr* thsp)
         : AstNodeExpr{t, fl} {
@@ -277,6 +294,13 @@ public:
     string emitVerilog() final override { V3ERROR_NA_RETURN(""); }
     string emitC() final override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const final override { V3ERROR_NA_RETURN(true); }
+    bool isPure() override;
+    const char* broken() const override;
+
+private:
+    bool getPurityRecurse() const {
+        return fromp()->isPure() && rhsp()->isPure() && (!thsp() || thsp()->isPure());
+    }
 };
 class AstNodeQuadop VL_NOT_FINAL : public AstNodeExpr {
     // 4-ary expression
@@ -284,6 +308,8 @@ class AstNodeQuadop VL_NOT_FINAL : public AstNodeExpr {
     // @astgen op2 := rhsp : AstNodeExpr
     // @astgen op3 := thsp : AstNodeExpr
     // @astgen op4 := fhsp : AstNodeExpr
+    VIsCached m_purity;  // Pure state
+
 protected:
     AstNodeQuadop(VNType t, FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp, AstNodeExpr* thsp,
                   AstNodeExpr* fhsp)
@@ -311,6 +337,13 @@ public:
     virtual bool sizeMattersFhs() const = 0;  // True if output result depends on ths size
     int instrCount() const override { return widthInstrs(); }
     bool same(const AstNode*) const override { return true; }
+    bool isPure() override;
+    const char* broken() const override;
+
+private:
+    bool getPurityRecurse() const {
+        return lhsp()->isPure() && rhsp()->isPure() && thsp()->isPure() && fhsp()->isPure();
+    }
 };
 class AstNodeTermop VL_NOT_FINAL : public AstNodeExpr {
     // Terminal operator -- an operator with no "inputs"
@@ -330,6 +363,8 @@ class AstNodeTriop VL_NOT_FINAL : public AstNodeExpr {
     // @astgen op1 := lhsp : AstNodeExpr
     // @astgen op2 := rhsp : AstNodeExpr
     // @astgen op3 := thsp : AstNodeExpr
+    VIsCached m_purity;  // Pure state
+
 protected:
     AstNodeTriop(VNType t, FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp, AstNodeExpr* thsp)
         : AstNodeExpr{t, fl} {
@@ -354,20 +389,21 @@ public:
     virtual bool sizeMattersThs() const = 0;  // True if output result depends on ths size
     int instrCount() const override { return widthInstrs(); }
     bool same(const AstNode*) const override { return true; }
+    bool isPure() override;
+    const char* broken() const override;
+
+private:
+    bool getPurityRecurse() const {
+        return lhsp()->isPure() && rhsp()->isPure() && thsp()->isPure();
+    }
 };
 class AstNodeCond VL_NOT_FINAL : public AstNodeTriop {
     // @astgen alias op1 := condp
     // @astgen alias op2 := thenp
     // @astgen alias op3 := elsep
 protected:
-    AstNodeCond(VNType t, FileLine* fl, AstNodeExpr* condp, AstNodeExpr* thenp, AstNodeExpr* elsep)
-        : AstNodeTriop{t, fl, condp, thenp, elsep} {
-        if (thenp) {
-            dtypeFrom(thenp);
-        } else if (elsep) {
-            dtypeFrom(elsep);
-        }
-    }
+    AstNodeCond(VNType t, FileLine* fl, AstNodeExpr* condp, AstNodeExpr* thenp,
+                AstNodeExpr* elsep);
 
 public:
     ASTGEN_MEMBERS_AstNodeCond;
@@ -409,6 +445,8 @@ public:
 class AstNodeUniop VL_NOT_FINAL : public AstNodeExpr {
     // Unary expression
     // @astgen op1 := lhsp : AstNodeExpr
+    VIsCached m_purity;  // Pure state
+
 protected:
     AstNodeUniop(VNType t, FileLine* fl, AstNodeExpr* lhsp)
         : AstNodeExpr{t, fl} {
@@ -430,6 +468,8 @@ public:
     virtual bool stringFlavor() const { return false; }  // N flavor of nodes with both flavors?
     int instrCount() const override { return widthInstrs(); }
     bool same(const AstNode*) const override { return true; }
+    bool isPure() override;
+    const char* broken() const override;
 };
 class AstNodeSystemUniopD VL_NOT_FINAL : public AstNodeUniop {
 public:
@@ -449,21 +489,19 @@ class AstNodeVarRef VL_NOT_FINAL : public AstNodeExpr {
     VAccess m_access;  // Left hand side assignment
     AstVar* m_varp;  // [AfterLink] Pointer to variable itself
     AstVarScope* m_varScopep = nullptr;  // Varscope for hierarchy
-    AstNodeModule* m_classOrPackagep = nullptr;  // Package hierarchy
-    string m_name;  // Name of variable
-    string m_selfPointer;  // Output code object pointer (e.g.: 'this')
-
+    AstNodeModule* m_classOrPackagep = nullptr;  // Class/package of the variable
+    VSelfPointerText m_selfPointer
+        = VSelfPointerText{VSelfPointerText::Empty()};  // Output code object
+                                                        // pointer (e.g.: 'this')
 protected:
-    AstNodeVarRef(VNType t, FileLine* fl, const string& name, const VAccess& access)
+    AstNodeVarRef(VNType t, FileLine* fl, const VAccess& access)
         : AstNodeExpr{t, fl}
-        , m_access{access}
-        , m_name{name} {
+        , m_access{access} {
         varp(nullptr);
     }
-    AstNodeVarRef(VNType t, FileLine* fl, const string& name, AstVar* varp, const VAccess& access)
+    AstNodeVarRef(VNType t, FileLine* fl, AstVar* varp, const VAccess& access)
         : AstNodeExpr{t, fl}
-        , m_access{access}
-        , m_name{name} {
+        , m_access{access} {
         // May have varp==nullptr
         this->varp(varp);
     }
@@ -474,8 +512,6 @@ public:
     const char* broken() const override;
     int instrCount() const override { return widthInstrs(); }
     void cloneRelink() override;
-    string name() const override VL_MT_STABLE { return m_name; }  // * = Var name
-    void name(const string& name) override { m_name = name; }
     VAccess access() const { return m_access; }
     void access(const VAccess& flag) { m_access = flag; }  // Avoid using this; Set in constructor
     AstVar* varp() const { return m_varp; }  // [After Link] Pointer to variable
@@ -485,9 +521,11 @@ public:
     }
     AstVarScope* varScopep() const { return m_varScopep; }
     void varScopep(AstVarScope* varscp) { m_varScopep = varscp; }
-    string selfPointer() const { return m_selfPointer; }
-    void selfPointer(const string& value) { m_selfPointer = value; }
-    string selfPointerProtect(bool useSelfForThis) const;
+    const VSelfPointerText& selfPointer() const { return m_selfPointer; }
+    void selfPointer(const VSelfPointerText& selfPointer) { m_selfPointer = selfPointer; }
+    string selfPointerProtect(bool useSelfForThis) const {
+        return selfPointer().protect(useSelfForThis, protect());
+    }
     AstNodeModule* classOrPackagep() const { return m_classOrPackagep; }
     void classOrPackagep(AstNodeModule* nodep) { m_classOrPackagep = nodep; }
     // Know no children, and hot function, so skip iterator for speed
@@ -582,6 +620,7 @@ public:
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool same(const AstNode* /*samep*/) const override { return true; }
+    bool isPure() override { return pure(); }
     bool pure() const { return m_pure; }
     void pure(bool flag) { m_pure = flag; }
 };
@@ -593,35 +632,29 @@ class AstCMethodHard final : public AstNodeExpr {
     string m_name;  // Name of method
     bool m_pure = false;  // Pure optimizable
 public:
-    AstCMethodHard(FileLine* fl, AstNodeExpr* fromp, VFlagChildDType, const string& name,
-                   AstNodeExpr* pinsp = nullptr)
-        : ASTGEN_SUPER_CMethodHard(fl)
-        , m_name{name} {
-        // TODO: this constructor is exactly the same as the other, bar the ignored tag argument
-        this->fromp(fromp);
-        this->addPinsp(pinsp);
-        dtypep(nullptr);  // V3Width will resolve
-    }
     AstCMethodHard(FileLine* fl, AstNodeExpr* fromp, const string& name,
                    AstNodeExpr* pinsp = nullptr)
         : ASTGEN_SUPER_CMethodHard(fl)
         , m_name{name} {
         this->fromp(fromp);
         this->addPinsp(pinsp);
+        setPurity();
     }
     ASTGEN_MEMBERS_AstCMethodHard;
     string name() const override VL_MT_STABLE { return m_name; }  // * = Var name
     void name(const string& name) override { m_name = name; }
     bool same(const AstNode* samep) const override {
-        const AstCMethodHard* asamep = static_cast<const AstCMethodHard*>(samep);
+        const AstCMethodHard* const asamep = VN_DBG_AS(samep, CMethodHard);
         return (m_name == asamep->m_name);
     }
-    bool isPure() const override { return m_pure; }
-    void pure(bool flag) { m_pure = flag; }
+    bool isPure() override { return m_pure; }
     int instrCount() const override;
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const override { return true; }
+
+private:
+    void setPurity();
 };
 class AstCast final : public AstNodeExpr {
     // Cast to appropriate data type
@@ -721,7 +754,7 @@ class AstClassOrPackageRef final : public AstNodeExpr {
 private:
     string m_name;
     // Node not NodeModule to appease some early parser usage
-    AstNode* m_classOrPackageNodep;  // Package hierarchy
+    AstNode* m_classOrPackageNodep;  // Pointer to class/package referenced
 public:
     AstClassOrPackageRef(FileLine* fl, const string& name, AstNode* classOrPackageNodep,
                          AstPin* paramsp)
@@ -743,7 +776,7 @@ public:
     }
     bool same(const AstNode* samep) const override {
         return (m_classOrPackageNodep
-                == static_cast<const AstClassOrPackageRef*>(samep)->m_classOrPackageNodep);
+                == VN_DBG_AS(samep, ClassOrPackageRef)->m_classOrPackageNodep);
     }
     void dump(std::ostream& str = std::cout) const override;
     string name() const override VL_MT_STABLE { return m_name; }  // * = Var name
@@ -1014,8 +1047,13 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const override { return true; }
     bool same(const AstNode* samep) const override {
-        const AstConst* const sp = static_cast<const AstConst*>(samep);
+        const AstConst* const sp = VN_DBG_AS(samep, Const);
         return num().isCaseEq(sp->num());
+    }
+    void cloneRelink() override { m_num.nodep(this); }
+    const char* broken() const override {
+        BROKEN_RTN(m_num.nodep() && m_num.nodep() != this);
+        return nullptr;
     }
     int instrCount() const override { return widthInstrs(); }
     bool isEqAllOnes() const { return num().isEqAllOnes(width()); }
@@ -1023,6 +1061,34 @@ public:
     // Parse string and create appropriate type of AstConst.
     // May return nullptr on parse failure.
     static AstConst* parseParamLiteral(FileLine* fl, const string& literal);
+};
+class AstCvtDynArrayToPacked final : public AstNodeExpr {
+    // Cast from dynamic queue data type to packed array
+    // @astgen op1 := fromp : AstNodeExpr
+public:
+    AstCvtDynArrayToPacked(FileLine* fl, AstNodeExpr* fromp, AstNodeDType* dtp)
+        : ASTGEN_SUPER_CvtDynArrayToPacked(fl) {
+        this->fromp(fromp);
+        dtypeFrom(dtp);
+    }
+    ASTGEN_MEMBERS_AstCvtDynArrayToPacked;
+    string emitVerilog() override { V3ERROR_NA_RETURN(""); }
+    string emitC() override { V3ERROR_NA_RETURN(""); }
+    bool cleanOut() const override { return true; }
+};
+class AstCvtPackedToDynArray final : public AstNodeExpr {
+    // Cast from packed array to dynamic queue data type
+    // @astgen op1 := fromp : AstNodeExpr
+public:
+    AstCvtPackedToDynArray(FileLine* fl, AstNodeExpr* fromp, AstNodeDType* dtp)
+        : ASTGEN_SUPER_CvtPackedToDynArray(fl) {
+        this->fromp(fromp);
+        dtypeFrom(dtp);
+    }
+    ASTGEN_MEMBERS_AstCvtPackedToDynArray;
+    string emitVerilog() override { V3ERROR_NA_RETURN(""); }
+    string emitC() override { V3ERROR_NA_RETURN(""); }
+    bool cleanOut() const override { return true; }
 };
 class AstDot final : public AstNodeExpr {
     // A dot separating paths in an AstVarXRef, AstFuncRef or AstTaskRef
@@ -1062,7 +1128,7 @@ public:
 };
 class AstEnumItemRef final : public AstNodeExpr {
     AstEnumItem* m_itemp;  // [AfterLink] Pointer to item
-    AstNodeModule* m_classOrPackagep;  // Package hierarchy
+    AstNodeModule* m_classOrPackagep;  // Class/package in which it was defined
 public:
     AstEnumItemRef(FileLine* fl, AstEnumItem* itemp, AstNodeModule* classOrPackagep)
         : ASTGEN_SUPER_EnumItemRef(fl)
@@ -1075,11 +1141,9 @@ public:
     string name() const override VL_MT_STABLE { return itemp()->name(); }
     int instrCount() const override { return 0; }
     const char* broken() const override;
-    void cloneRelink() override {
-        if (m_itemp->clonep()) m_itemp = m_itemp->clonep();
-    }
+    void cloneRelink() override;
     bool same(const AstNode* samep) const override {
-        const AstEnumItemRef* const sp = static_cast<const AstEnumItemRef*>(samep);
+        const AstEnumItemRef* const sp = VN_DBG_AS(samep, EnumItemRef);
         return itemp() == sp->itemp();
     }
     AstEnumItem* itemp() const VL_MT_STABLE { return m_itemp; }
@@ -1107,6 +1171,10 @@ public:
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const override { return true; }
+    bool isPure() override {
+        if (AstNode::afterCommentp(stmtsp())) return false;
+        return resultp()->isPure();
+    }
     bool same(const AstNode*) const override { return true; }
 };
 class AstFError final : public AstNodeExpr {
@@ -1124,7 +1192,7 @@ public:
     bool cleanOut() const override { return true; }
     int instrCount() const override { return widthInstrs() * 64; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: $display has 'visual' ordering
+    bool isPure() override { return false; }  // SPECIAL: $display has 'visual' ordering
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
 class AstFOpen final : public AstNodeExpr {
@@ -1143,8 +1211,8 @@ public:
     string verilogKwd() const override { return "$fopen"; }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }
+    bool isOutputter() override { return true; }
     bool isUnlikely() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
@@ -1162,8 +1230,8 @@ public:
     string verilogKwd() const override { return "$fopen"; }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }
+    bool isOutputter() override { return true; }
     bool isUnlikely() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
@@ -1186,8 +1254,8 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: has 'visual' ordering
-    bool isOutputter() const override { return true; }  // SPECIAL: makes output
+    bool isPure() override { return false; }  // SPECIAL: has 'visual' ordering
+    bool isOutputter() override { return true; }  // SPECIAL: makes output
     bool cleanOut() const override { return false; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
@@ -1204,8 +1272,8 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }
+    bool isOutputter() override { return true; }
     bool isUnlikely() const override { return true; }
     bool cleanOut() const override { return false; }
     bool same(const AstNode* /*samep*/) const override { return true; }
@@ -1229,11 +1297,11 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: has 'visual' ordering
-    bool isOutputter() const override { return true; }  // SPECIAL: makes output
+    bool isPure() override { return false; }  // SPECIAL: has 'visual' ordering
+    bool isOutputter() override { return true; }  // SPECIAL: makes output
     bool cleanOut() const override { return false; }
     bool same(const AstNode* samep) const override {
-        return text() == static_cast<const AstFScanF*>(samep)->text();
+        return text() == VN_DBG_AS(samep, FScanF)->text();
     }
     string text() const { return m_text; }  // * = Text to display
     void text(const string& text) { m_text = text; }
@@ -1255,8 +1323,8 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: has 'visual' ordering
-    bool isOutputter() const override { return true; }  // SPECIAL: makes output
+    bool isPure() override { return false; }  // SPECIAL: has 'visual' ordering
+    bool isOutputter() override { return true; }  // SPECIAL: makes output
     bool cleanOut() const override { return false; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
@@ -1273,8 +1341,8 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }
+    bool isOutputter() override { return true; }
     bool isUnlikely() const override { return true; }
     bool cleanOut() const override { return false; }
     bool same(const AstNode* /*samep*/) const override { return true; }
@@ -1313,7 +1381,9 @@ public:
     bool cleanOut() const override { return true; }
 };
 class AstImplication final : public AstNodeExpr {
-    // Verilog |-> |=>
+    // Verilog Implication Operator
+    // Nonoverlapping "|=>"
+    // Overlapping "|->" (doesn't currently use this - might make new Ast type)
     // @astgen op1 := lhsp : AstNodeExpr
     // @astgen op2 := rhsp : AstNodeExpr
     // @astgen op3 := sentreep : Optional[AstSenTree]
@@ -1360,7 +1430,7 @@ public:
     bool same(const AstNode* samep) const override {
         // Only works if exact same children, instead should override comparison
         // of children list, and instead use map-vs-map key/value compare
-        return m_map == static_cast<const AstInitArray*>(samep)->m_map;
+        return m_map == VN_DBG_AS(samep, InitArray)->m_map;
     }
     void addValuep(AstNodeExpr* newp) { addIndexValuep(m_map.size(), newp); }
     const KeyItemMap& map() const { return m_map; }
@@ -1428,6 +1498,7 @@ class AstMemberSel final : public AstNodeExpr {
     // @astgen op1 := fromp : AstNodeExpr
     // Don't need the class we are extracting from, as the "fromp()"'s datatype can get us to it
     string m_name;
+    VAccess m_access;  // Read or write, as in AstNodeVarRef
     AstVar* m_varp = nullptr;  // Post link, variable within class that is target of selection
 public:
     AstMemberSel(FileLine* fl, AstNodeExpr* fromp, VFlagChildDType, const string& name)
@@ -1448,10 +1519,12 @@ public:
     void dump(std::ostream& str) const override;
     string name() const override VL_MT_STABLE { return m_name; }
     void name(const string& name) override { m_name = name; }
+    VAccess access() const { return m_access; }
+    void access(const VAccess& flag) { m_access = flag; }
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const override { return true; }
-    bool same(const AstNode* samep) const override { return true; }  // dtype comparison does it
+    bool same(const AstNode* samep) const override;
     int instrCount() const override { return widthInstrs(); }
     AstVar* varp() const { return m_varp; }
     void varp(AstVar* nodep) { m_varp = nodep; }
@@ -1513,7 +1586,7 @@ public:
     void dump(std::ostream& str) const override;
     string name() const override VL_MT_STABLE { return m_name; }  // * = Var name
     bool same(const AstNode* samep) const override {
-        const AstParseRef* const asamep = static_cast<const AstParseRef*>(samep);
+        const AstParseRef* const asamep = VN_DBG_AS(samep, ParseRef);
         return (expect() == asamep->expect() && m_name == asamep->m_name);
     }
     void name(const string& name) override { m_name = name; }
@@ -1708,7 +1781,7 @@ public:
     string name() const override VL_MT_STABLE { return m_text; }
     int instrCount() const override { return INSTR_COUNT_PLI; }
     bool same(const AstNode* samep) const override {
-        return text() == static_cast<const AstSFormatF*>(samep)->text();
+        return text() == VN_DBG_AS(samep, SFormatF)->text();
     }
     string verilogKwd() const override { return "$sformatf"; }
     string text() const { return m_text; }  // * = Text to display
@@ -1746,11 +1819,11 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: has 'visual' ordering
-    bool isOutputter() const override { return true; }  // SPECIAL: makes output
+    bool isPure() override { return false; }  // SPECIAL: has 'visual' ordering
+    bool isOutputter() override { return true; }  // SPECIAL: makes output
     bool cleanOut() const override { return false; }
     bool same(const AstNode* samep) const override {
-        return text() == static_cast<const AstSScanF*>(samep)->text();
+        return text() == VN_DBG_AS(samep, SScanF)->text();
     }
     string text() const { return m_text; }  // * = Text to display
     void text(const string& text) { m_text = text; }
@@ -1790,8 +1863,8 @@ public:
     }
     ASTGEN_MEMBERS_AstScopeName;
     bool same(const AstNode* samep) const override {
-        return (m_dpiExport == static_cast<const AstScopeName*>(samep)->m_dpiExport
-                && m_forFormat == static_cast<const AstScopeName*>(samep)->m_forFormat);
+        const AstScopeName* const sp = VN_DBG_AS(samep, ScopeName);
+        return (m_dpiExport == sp->m_dpiExport && m_forFormat == sp->m_forFormat);
     }
     string emitVerilog() override { return ""; }
     string emitC() override { V3ERROR_NA_RETURN(""); }
@@ -1904,14 +1977,14 @@ public:
     string emitC() override { return "VL_STACKTRACE_N()"; }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }
+    bool isOutputter() override { return true; }
     bool isUnlikely() const override { return true; }
     bool cleanOut() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
 class AstStructSel final : public AstNodeExpr {
-    // Unpacked struct member access
+    // Unpacked struct/union member access
     // Parents: math|stmt
     // Children: varref, math
     // @astgen op1 := fromp : AstNodeExpr
@@ -1929,9 +2002,12 @@ public:
     void name(const string& name) override { m_name = name; }
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
-    bool cleanOut() const override { return false; }
+    bool cleanOut() const override {
+        // Not a union
+        return VN_IS(fromp()->dtypep()->skipRefp(), StructDType);
+    }
     bool same(const AstNode* samep) const override {
-        const AstStructSel* const sp = static_cast<const AstStructSel*>(samep);
+        const AstStructSel* const sp = VN_DBG_AS(samep, StructSel);
         return m_name == sp->m_name;
     }
     int instrCount() const override { return widthInstrs(); }
@@ -1947,8 +2023,8 @@ public:
     string verilogKwd() const override { return "$ignored"; }
     bool isGateOptimizable() const override { return false; }  // Though deleted before opt
     bool isPredictOptimizable() const override { return false; }  // Though deleted before opt
-    bool isPure() const override { return false; }  // Though deleted before opt
-    bool isOutputter() const override { return true; }  // Though deleted before opt
+    bool isPure() override { return false; }  // Though deleted before opt
+    bool isOutputter() override { return true; }  // Though deleted before opt
     int instrCount() const override { return INSTR_COUNT_PLI; }
 
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
@@ -1969,8 +2045,8 @@ public:
     string emitC() override { return "VL_SYSTEM_%nq(%lw, %P)"; }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }
+    bool isOutputter() override { return true; }
     bool isUnlikely() const override { return true; }
     bool cleanOut() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
@@ -2053,8 +2129,8 @@ public:
     bool cleanOut() const override { return false; }
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
-    bool isPure() const override { return false; }  // SPECIAL: User may order w/other sigs
-    bool isOutputter() const override { return true; }
+    bool isPure() override { return false; }  // SPECIAL: User may order w/other sigs
+    bool isOutputter() override { return true; }
     bool isGateOptimizable() const override { return false; }
     bool isSubstOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
@@ -2109,7 +2185,7 @@ public:
     string emitC() override { V3ERROR_NA_RETURN(""); }
     bool isGateOptimizable() const override { return false; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return !outp(); }
+    bool isPure() override { return !outp(); }
     bool cleanOut() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
@@ -2122,14 +2198,14 @@ class AstWith final : public AstNodeExpr {
     // Children: expression (equation establishing the with)
     // @astgen op1 := indexArgRefp : AstLambdaArgRef
     // @astgen op2 := valueArgRefp : AstLambdaArgRef
-    // @astgen op3 := exprp : AstNodeExpr
+    // @astgen op3 := exprp : List[AstNode]
 public:
     AstWith(FileLine* fl, AstLambdaArgRef* indexArgRefp, AstLambdaArgRef* valueArgRefp,
             AstNodeExpr* exprp)
         : ASTGEN_SUPER_With(fl) {
         this->indexArgRefp(indexArgRefp);
         this->valueArgRefp(valueArgRefp);
-        this->exprp(exprp);
+        this->addExprp(exprp);
     }
     ASTGEN_MEMBERS_AstWith;
     bool same(const AstNode* /*samep*/) const override { return true; }
@@ -2216,7 +2292,7 @@ public:
     bool sizeMattersLhs() const override { return false; }
     bool sizeMattersRhs() const override { return false; }
     int instrCount() const override { return widthInstrs() * 20; }
-    bool isPure() const override { return true; }
+    bool isPure() override { return true; }
 };
 class AstCompareNN final : public AstNodeBiop {
     // Verilog str.compare() and str.icompare()
@@ -2440,7 +2516,7 @@ public:
     bool sizeMattersRhs() const override { return false; }
     int instrCount() const override { return widthInstrs() * 64; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: $display has 'visual' ordering
+    bool isPure() override { return false; }  // SPECIAL: $display has 'visual' ordering
     AstNode* filep() const { return lhsp(); }
     AstNode* charp() const { return rhsp(); }
 };
@@ -2725,11 +2801,6 @@ public:
     int instrCount() const override { return widthInstrs() + INSTR_COUNT_BRANCH; }
 };
 class AstLogOr final : public AstNodeBiop {
-    // LOGOR with optional side effects
-    // Side effects currently used in some V3Width code
-    // TBD if this concept is generally adopted for side-effect tracking
-    // versus V3Const tracking it itself
-    bool m_sideEffect = false;  // Has side effect, relies on short-circuiting
 public:
     AstLogOr(FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp)
         : ASTGEN_SUPER_LogOr(fl, lhsp, rhsp) {
@@ -2742,11 +2813,6 @@ public:
     void numberOperate(V3Number& out, const V3Number& lhs, const V3Number& rhs) override {
         out.opLogOr(lhs, rhs);
     }
-    bool same(const AstNode* samep) const override {
-        const AstLogOr* const sp = static_cast<const AstLogOr*>(samep);
-        return m_sideEffect == sp->m_sideEffect;
-    }
-    void dump(std::ostream& str = std::cout) const override;
     string emitVerilog() override { return "%k(%l %f|| %r)"; }
     string emitC() override { return "VL_LOGOR_%nq%lq%rq(%nw,%lw,%rw, %P, %li, %ri)"; }
     string emitSimpleOperator() override { return "||"; }
@@ -2756,9 +2822,6 @@ public:
     bool sizeMattersLhs() const override { return false; }
     bool sizeMattersRhs() const override { return false; }
     int instrCount() const override { return widthInstrs() + INSTR_COUNT_BRANCH; }
-    bool isPure() const override { return !m_sideEffect; }
-    void sideEffect(bool flag) { m_sideEffect = flag; }
-    bool sideEffect() const { return m_sideEffect; }
 };
 class AstLt final : public AstNodeBiop {
 public:
@@ -3213,6 +3276,30 @@ public:
     bool sizeMattersLhs() const override { return true; }
     bool sizeMattersRhs() const override { return false; }
 };
+class AstShiftLOvr final : public AstNodeBiop {
+    // Like ShiftL but checks for an over shift and returns zeros
+    // TODO: All Verilog shifts should start as these and later get demoted to AstShiftL
+public:
+    AstShiftLOvr(FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp, int setwidth = 0)
+        : ASTGEN_SUPER_ShiftLOvr(fl, lhsp, rhsp) {
+        if (setwidth) dtypeSetLogicSized(setwidth, VSigning::UNSIGNED);
+    }
+    ASTGEN_MEMBERS_AstShiftLOvr;
+    AstNodeExpr* cloneType(AstNodeExpr* lhsp, AstNodeExpr* rhsp) override {
+        return new AstShiftLOvr{fileline(), lhsp, rhsp};
+    }
+    void numberOperate(V3Number& out, const V3Number& lhs, const V3Number& rhs) override {
+        out.opShiftL(lhs, rhs);
+    }
+    string emitVerilog() override { return "%k(%l %f<< %r)"; }
+    string emitC() override { return "VL_SHIFTL_%nq%lq%rq(%nw,%lw,%rw, %P, %li, %ri)"; }
+    string emitSimpleOperator() override { return ""; }
+    bool cleanOut() const override { return false; }
+    bool cleanLhs() const override { return false; }
+    bool cleanRhs() const override { return true; }
+    bool sizeMattersLhs() const override { return true; }
+    bool sizeMattersRhs() const override { return false; }
+};
 class AstShiftR final : public AstNodeBiop {
 public:
     AstShiftR(FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp, int setwidth = 0)
@@ -3238,6 +3325,31 @@ public:
     bool sizeMattersLhs() const override { return false; }
     bool sizeMattersRhs() const override { return false; }
 };
+class AstShiftROvr final : public AstNodeBiop {
+    // Like ShiftR but checks for an over shift and returns zeros
+    // TODO: All Verilog shifts should start as these and later get demoted to AstShiftR
+public:
+    AstShiftROvr(FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp, int setwidth = 0)
+        : ASTGEN_SUPER_ShiftROvr(fl, lhsp, rhsp) {
+        if (setwidth) dtypeSetLogicSized(setwidth, VSigning::UNSIGNED);
+    }
+    ASTGEN_MEMBERS_AstShiftROvr;
+    AstNodeExpr* cloneType(AstNodeExpr* lhsp, AstNodeExpr* rhsp) override {
+        return new AstShiftROvr{fileline(), lhsp, rhsp};
+    }
+    void numberOperate(V3Number& out, const V3Number& lhs, const V3Number& rhs) override {
+        out.opShiftR(lhs, rhs);
+    }
+    string emitVerilog() override { return "%k(%l %f>> %r)"; }
+    string emitC() override { return "VL_SHIFTR_%nq%lq%rq(%nw,%lw,%rw, %P, %li, %ri)"; }
+    string emitSimpleOperator() override { return ""; }
+    bool cleanOut() const override { return false; }
+    bool cleanLhs() const override { return true; }
+    bool cleanRhs() const override { return true; }
+    // LHS size might be > output size, so don't want to force size
+    bool sizeMattersLhs() const override { return false; }
+    bool sizeMattersRhs() const override { return false; }
+};
 class AstShiftRS final : public AstNodeBiop {
     // Shift right with sign extension, >>> operator
     // Output data type's width determines which bit is used for sign extension
@@ -3250,6 +3362,33 @@ public:
     ASTGEN_MEMBERS_AstShiftRS;
     AstNodeExpr* cloneType(AstNodeExpr* lhsp, AstNodeExpr* rhsp) override {
         return new AstShiftRS{fileline(), lhsp, rhsp};
+    }
+    void numberOperate(V3Number& out, const V3Number& lhs, const V3Number& rhs) override {
+        out.opShiftRS(lhs, rhs, lhsp()->widthMinV());
+    }
+    string emitVerilog() override { return "%k(%l %f>>> %r)"; }
+    string emitC() override { return "VL_SHIFTRS_%nq%lq%rq(%nw,%lw,%rw, %P, %li, %ri)"; }
+    string emitSimpleOperator() override { return ""; }
+    bool cleanOut() const override { return false; }
+    bool cleanLhs() const override { return true; }
+    bool cleanRhs() const override { return true; }
+    bool sizeMattersLhs() const override { return false; }
+    bool sizeMattersRhs() const override { return false; }
+    bool signedFlavor() const override { return true; }
+};
+class AstShiftRSOvr final : public AstNodeBiop {
+    // Shift right with sign extension, >>> operator, checks for an over shift and returns zeros
+    // Output data type's width determines which bit is used for sign extension
+    // TODO: All Verilog shifts should start as these and later get demoted to AstShiftRSOvr
+public:
+    AstShiftRSOvr(FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* rhsp, int setwidth = 0)
+        : ASTGEN_SUPER_ShiftRSOvr(fl, lhsp, rhsp) {
+        // Important that widthMin be correct, as opExtend requires it after V3Expand
+        if (setwidth) dtypeSetLogicSized(setwidth, VSigning::SIGNED);
+    }
+    ASTGEN_MEMBERS_AstShiftRSOvr;
+    AstNodeExpr* cloneType(AstNodeExpr* lhsp, AstNodeExpr* rhsp) override {
+        return new AstShiftRSOvr{fileline(), lhsp, rhsp};
     }
     void numberOperate(V3Number& out, const V3Number& lhs, const V3Number& rhs) override {
         out.opShiftRS(lhs, rhs, lhsp()->widthMinV());
@@ -4022,16 +4161,19 @@ public:
 // === AstNodeCCall ===
 class AstCCall final : public AstNodeCCall {
     // C++ function call
-    string m_selfPointer;  // Output code object pointer (e.g.: 'this')
-
+    VSelfPointerText m_selfPointer
+        = VSelfPointerText{VSelfPointerText::Empty()};  // Output code object
+                                                        // pointer (e.g.: 'this')
 public:
     AstCCall(FileLine* fl, AstCFunc* funcp, AstNodeExpr* argsp = nullptr)
         : ASTGEN_SUPER_CCall(fl, funcp, argsp) {}
     ASTGEN_MEMBERS_AstCCall;
 
-    string selfPointer() const { return m_selfPointer; }
-    void selfPointer(const string& value) { m_selfPointer = value; }
-    string selfPointerProtect(bool useSelfForThis) const;
+    const VSelfPointerText& selfPointer() const { return m_selfPointer; }
+    void selfPointer(const VSelfPointerText& selfPointer) { m_selfPointer = selfPointer; }
+    string selfPointerProtect(bool useSelfForThis) const {
+        return selfPointer().protect(useSelfForThis, protect());
+    }
 };
 class AstCMethodCall final : public AstNodeCCall {
     // C++ method call
@@ -4059,12 +4201,15 @@ public:
 // === AstNodeFTaskRef ===
 class AstFuncRef final : public AstNodeFTaskRef {
     // A reference to a function
+    bool m_superReference = false;  // Called with super reference
 public:
     AstFuncRef(FileLine* fl, AstParseRef* namep, AstNodeExpr* pinsp)
         : ASTGEN_SUPER_FuncRef(fl, (AstNode*)namep, pinsp) {}
     AstFuncRef(FileLine* fl, const string& name, AstNodeExpr* pinsp)
         : ASTGEN_SUPER_FuncRef(fl, name, pinsp) {}
     ASTGEN_MEMBERS_AstFuncRef;
+    bool superReference() const { return m_superReference; }
+    void superReference(bool flag) { m_superReference = flag; }
 };
 class AstMethodCall final : public AstNodeFTaskRef {
     // A reference to a member task (or function)
@@ -4101,6 +4246,7 @@ public:
 };
 class AstTaskRef final : public AstNodeFTaskRef {
     // A reference to a task
+    bool m_superReference = false;  // Called with super reference
 public:
     AstTaskRef(FileLine* fl, AstParseRef* namep, AstNodeExpr* pinsp)
         : ASTGEN_SUPER_TaskRef(fl, (AstNode*)namep, pinsp) {
@@ -4111,6 +4257,8 @@ public:
         dtypeSetVoid();
     }
     ASTGEN_MEMBERS_AstTaskRef;
+    bool superReference() const { return m_superReference; }
+    void superReference(bool flag) { m_superReference = flag; }
 };
 
 // === AstNodePreSel ===
@@ -4161,10 +4309,10 @@ class AstCountBits final : public AstNodeQuadop {
     // Number of bits set in vector
 public:
     AstCountBits(FileLine* fl, AstNodeExpr* exprp, AstNodeExpr* ctrl1p)
-        : ASTGEN_SUPER_CountBits(fl, exprp, ctrl1p, ctrl1p->cloneTree(false),
-                                 ctrl1p->cloneTree(false)) {}
+        : ASTGEN_SUPER_CountBits(fl, exprp, ctrl1p, ctrl1p->cloneTreePure(false),
+                                 ctrl1p->cloneTreePure(false)) {}
     AstCountBits(FileLine* fl, AstNodeExpr* exprp, AstNodeExpr* ctrl1p, AstNodeExpr* ctrl2p)
-        : ASTGEN_SUPER_CountBits(fl, exprp, ctrl1p, ctrl2p, ctrl2p->cloneTree(false)) {}
+        : ASTGEN_SUPER_CountBits(fl, exprp, ctrl1p, ctrl2p, ctrl2p->cloneTreePure(false)) {}
     AstCountBits(FileLine* fl, AstNodeExpr* exprp, AstNodeExpr* ctrl1p, AstNodeExpr* ctrl2p,
                  AstNodeExpr* ctrl3p)
         : ASTGEN_SUPER_CountBits(fl, exprp, ctrl1p, ctrl2p, ctrl3p) {}
@@ -4611,7 +4759,7 @@ public:
     bool cleanLhs() const override { return true; }
     bool sizeMattersLhs() const override { return false; }  // Special cased in V3Cast
     bool same(const AstNode* samep) const override {
-        return size() == static_cast<const AstCCast*>(samep)->size();
+        return size() == VN_DBG_AS(samep, CCast)->size();
     }
     void dump(std::ostream& str = std::cout) const override;
     //
@@ -4671,7 +4819,7 @@ public:
     ASTGEN_MEMBERS_AstCvtPackString;
     void numberOperate(V3Number& out, const V3Number& lhs) override { out.opAssign(lhs); }
     string emitVerilog() override { return "%f$_CAST(%l)"; }
-    string emitC() override { return "VL_CVT_PACK_STR_N%lq(%lW, %li)"; }
+    string emitC() override { V3ERROR_NA_RETURN(""); }
     bool cleanOut() const override { return true; }
     bool cleanLhs() const override { return true; }
     bool sizeMattersLhs() const override { return false; }
@@ -4734,7 +4882,7 @@ public:
     bool sizeMattersLhs() const override { return false; }
     int instrCount() const override { return widthInstrs() * 16; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: $display has 'visual' ordering
+    bool isPure() override { return false; }  // SPECIAL: $display has 'visual' ordering
     AstNode* filep() const { return lhsp(); }
 };
 class AstFGetC final : public AstNodeUniop {
@@ -4751,7 +4899,7 @@ public:
     bool sizeMattersLhs() const override { return false; }
     int instrCount() const override { return widthInstrs() * 64; }
     bool isPredictOptimizable() const override { return false; }
-    bool isPure() const override { return false; }  // SPECIAL: $display has 'visual' ordering
+    bool isPure() override { return false; }  // SPECIAL: $display has 'visual' ordering
     AstNode* filep() const { return lhsp(); }
 };
 class AstISToRD final : public AstNodeUniop {
@@ -5057,6 +5205,21 @@ public:
     bool sizeMattersLhs() const override { return false; }
     int instrCount() const override { return 1 + V3Number::log2b(width()); }
 };
+class AstResizeLValue final : public AstNodeUniop {
+    // Resize a LValue into a wider/narrower entity at function argument boundry
+    // Width and signness is implied from nodep->width()
+public:
+    AstResizeLValue(FileLine* fl, AstNodeExpr* lhsp)
+        : ASTGEN_SUPER_ResizeLValue(fl, lhsp) {}
+    ASTGEN_MEMBERS_AstResizeLValue;
+    void numberOperate(V3Number& out, const V3Number& lhs) override { V3ERROR_NA; }
+    string emitVerilog() override { return "%l"; }
+    string emitC() final override { V3ERROR_NA_RETURN(""); }
+    bool cleanOut() const override { return true; }
+    bool cleanLhs() const override { return true; }
+    bool sizeMattersLhs() const override { return false; }
+    int instrCount() const override { return 0; }
+};
 class AstSigned final : public AstNodeUniop {
     // $signed(lhs)
 public:
@@ -5349,15 +5512,15 @@ public:
 class AstVarRef final : public AstNodeVarRef {
     // A reference to a variable (lvalue or rvalue)
 public:
-    AstVarRef(FileLine* fl, const string& name, const VAccess& access)
-        : ASTGEN_SUPER_VarRef(fl, name, nullptr, access) {}
     // This form only allowed post-link because output/wire compression may
     // lead to deletion of AstVar's
     inline AstVarRef(FileLine* fl, AstVar* varp, const VAccess& access);
     // This form only allowed post-link (see above)
     inline AstVarRef(FileLine* fl, AstVarScope* varscp, const VAccess& access);
     ASTGEN_MEMBERS_AstVarRef;
+    inline string name() const override;  // * = Var name
     void dump(std::ostream& str) const override;
+    const char* broken() const override;
     bool same(const AstNode* samep) const override;
     inline bool same(const AstVarRef* samep) const;
     inline bool sameNoLvalue(AstVarRef* samep) const;
@@ -5369,14 +5532,17 @@ public:
 class AstVarXRef final : public AstNodeVarRef {
     // A VarRef to something in another module before AstScope.
     // Includes pin on a cell, as part of a ASSIGN statement to connect I/Os until AstScope
+    string m_name;
     string m_dotted;  // Dotted part of scope the name()'ed reference is under or ""
     string m_inlinedDots;  // Dotted hierarchy flattened out
 public:
     AstVarXRef(FileLine* fl, const string& name, const string& dotted, const VAccess& access)
-        : ASTGEN_SUPER_VarXRef(fl, name, nullptr, access)
+        : ASTGEN_SUPER_VarXRef(fl, nullptr, access)
+        , m_name{name}
         , m_dotted{dotted} {}
     inline AstVarXRef(FileLine* fl, AstVar* varp, const string& dotted, const VAccess& access);
     ASTGEN_MEMBERS_AstVarXRef;
+    string name() const override VL_MT_STABLE { return m_name; }  // * = Var name
     void dump(std::ostream& str) const override;
     string dotted() const { return m_dotted; }
     void dotted(const string& dotted) { m_dotted = dotted; }
@@ -5387,7 +5553,7 @@ public:
     bool cleanOut() const override { return true; }
     int instrCount() const override { return widthInstrs(); }
     bool same(const AstNode* samep) const override {
-        const AstVarXRef* asamep = static_cast<const AstVarXRef*>(samep);
+        const AstVarXRef* asamep = VN_DBG_AS(samep, VarXRef);
         return (selfPointer() == asamep->selfPointer() && varp() == asamep->varp()
                 && name() == asamep->name() && dotted() == asamep->dotted());
     }

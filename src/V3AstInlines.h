@@ -39,8 +39,16 @@ bool AstNode::isDouble() const VL_MT_STABLE {
 bool AstNode::isString() const VL_MT_STABLE {
     return dtypep() && dtypep()->basicp() && dtypep()->basicp()->isString();
 }
+bool AstNode::isEvent() const VL_MT_STABLE {
+    return dtypep() && dtypep()->basicp() && dtypep()->basicp()->isEvent();
+}
+
 bool AstNode::isSigned() const VL_MT_STABLE { return dtypep() && dtypep()->isSigned(); }
 
+bool AstNode::isClassHandleValue() const {
+    return (VN_IS(this, Const) && VN_AS(this, Const)->num().isNull())
+           || VN_IS(dtypep(), ClassRefDType);
+}
 bool AstNode::isZero() const {
     return (VN_IS(this, Const) && VN_AS(this, Const)->num().isEqZero());
 }
@@ -150,12 +158,15 @@ AstCExpr::AstCExpr(FileLine* fl, const string& textStmt, int setwidth, bool clea
 }
 
 AstVarRef::AstVarRef(FileLine* fl, AstVar* varp, const VAccess& access)
-    : ASTGEN_SUPER_VarRef(fl, varp->name(), varp, access) {}
+    : ASTGEN_SUPER_VarRef(fl, varp, access) {}
 // This form only allowed post-link (see above)
 AstVarRef::AstVarRef(FileLine* fl, AstVarScope* varscp, const VAccess& access)
-    : ASTGEN_SUPER_VarRef(fl, varscp->varp()->name(), varscp->varp(), access) {
+    : ASTGEN_SUPER_VarRef(fl, varscp->varp(), access) {
     varScopep(varscp);
 }
+
+string AstVarRef::name() const { return varp() ? varp()->name() : "<null>"; }
+
 bool AstVarRef::same(const AstVarRef* samep) const {
     if (varScopep()) {
         return (varScopep() == samep->varScopep() && access() == samep->access());
@@ -169,13 +180,14 @@ bool AstVarRef::sameNoLvalue(AstVarRef* samep) const {
         return (varScopep() == samep->varScopep());
     } else {
         return (selfPointer() == samep->selfPointer()
-                && (!selfPointer().empty() || !samep->selfPointer().empty())
+                && (!selfPointer().isEmpty() || !samep->selfPointer().isEmpty())
                 && varp()->name() == samep->varp()->name());
     }
 }
 
 AstVarXRef::AstVarXRef(FileLine* fl, AstVar* varp, const string& dotted, const VAccess& access)
-    : ASTGEN_SUPER_VarXRef(fl, varp->name(), varp, access)
+    : ASTGEN_SUPER_VarXRef(fl, varp, access)
+    , m_name{varp->name()}
     , m_dotted{dotted} {
     dtypeFrom(varp);
 }

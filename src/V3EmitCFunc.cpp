@@ -14,13 +14,10 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstMT.h"
 
 #include "V3EmitCFunc.h"
 
-#include "V3Global.h"
-#include "V3String.h"
 #include "V3TSP.h"
 
 #include <map>
@@ -108,7 +105,7 @@ void EmitCFunc::emitOpName(AstNode* nodep, const string& format, AstNode* lhsp, 
                     UASSERT_OBJ(m_wideTempRefp, nodep,
                                 "Wide Op w/ no temp, perhaps missing op in V3EmitC?");
                     COMMA;
-                    if (!m_wideTempRefp->selfPointer().empty()) {
+                    if (!m_wideTempRefp->selfPointer().isEmpty()) {
                         emitDereference(m_wideTempRefp->selfPointerProtect(m_useSelfForThis));
                     }
                     puts(m_wideTempRefp->varp()->nameProtect());
@@ -314,6 +311,7 @@ void EmitCFunc::displayNode(AstNode* nodep, AstScopeName* scopenamep, const stri
 
     // Convert Verilog display to C printf formats
     //          "%0t" becomes "%d"
+    VL_RESTORER(m_emitDispState);
     m_emitDispState.clear();
     string vfmt;
     string::const_iterator pos = vformat.begin();
@@ -409,12 +407,24 @@ void EmitCFunc::displayNode(AstNode* nodep, AstScopeName* scopenamep, const stri
     displayEmit(nodep, isScan);
 }
 
-void EmitCFunc::emitCCallArgs(const AstNodeCCall* nodep, const string& selfPointer) {
+void EmitCFunc::emitCCallArgs(const AstNodeCCall* nodep, const string& selfPointer,
+                              bool inProcess) {
     puts("(");
     bool comma = false;
     if (nodep->funcp()->isLoose() && !nodep->funcp()->isStatic()) {
         UASSERT_OBJ(!selfPointer.empty(), nodep, "Call to loose method without self pointer");
         puts(selfPointer);
+        comma = true;
+    }
+    if (nodep->funcp()->needProcess()) {
+        if (comma) puts(", ");
+        if (VN_IS(nodep->backp(), CAwait) || !nodep->funcp()->isCoroutine()) {
+            puts("vlProcess");
+        } else if (inProcess) {
+            puts("std::make_shared<VlProcess>(vlProcess)");
+        } else {
+            puts("std::make_shared<VlProcess>()");
+        }
         comma = true;
     }
     if (!nodep->argTypes().empty()) {
@@ -443,6 +453,10 @@ void EmitCFunc::emitCvtPackStr(AstNode* nodep) {
         putbs("std::string{");
         putsQuoted(constp->num().toString());
         puts("}");
+    } else if (VN_IS(nodep->dtypep(), StreamDType)) {
+        putbs("VL_CVT_PACK_STR_ND(");
+        iterateAndNextConstNull(nodep);
+        puts(")");
     } else {
         putbs("VL_CVT_PACK_STR_N");
         emitIQW(nodep);
@@ -503,7 +517,7 @@ void EmitCFunc::emitConstant(AstConst* nodep, AstVarRef* assigntop, const string
             if (!assigntop) {
                 puts(assignString);
             } else {
-                if (!assigntop->selfPointer().empty()) {
+                if (!assigntop->selfPointer().isEmpty()) {
                     emitDereference(assigntop->selfPointerProtect(m_useSelfForThis));
                 }
                 puts(assigntop->varp()->nameProtect());
@@ -525,7 +539,7 @@ void EmitCFunc::emitConstant(AstConst* nodep, AstVarRef* assigntop, const string
             if (!assigntop) {
                 puts(assignString);
             } else {
-                if (!assigntop->selfPointer().empty()) {
+                if (!assigntop->selfPointer().isEmpty()) {
                     emitDereference(assigntop->selfPointerProtect(m_useSelfForThis));
                 }
                 puts(assigntop->varp()->nameProtect());
@@ -653,6 +667,8 @@ string EmitCFunc::emitVarResetRecurse(const AstVar* varp, const string& varNameP
         const string cvtarray = (adtypep->subDTypep()->isWide() ? ".data()" : "");
         return emitVarResetRecurse(varp, varNameProtected, adtypep->subDTypep(), depth + 1,
                                    suffix + ".atDefault()" + cvtarray);
+    } else if (VN_IS(dtypep, CDType)) {
+        return "";  // Constructor does it
     } else if (VN_IS(dtypep, ClassRefDType)) {
         return "";  // Constructor does it
     } else if (VN_IS(dtypep, IfaceRefDType)) {
@@ -694,6 +710,8 @@ string EmitCFunc::emitVarResetRecurse(const AstVar* varp, const string& varNameP
         // String's constructor deals with it
         return "";
     } else if (basicp && basicp->isForkSync()) {
+        return "";
+    } else if (basicp && basicp->isProcessRef()) {
         return "";
     } else if (basicp && basicp->isDelayScheduler()) {
         return "";

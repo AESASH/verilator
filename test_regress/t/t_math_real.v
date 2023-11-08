@@ -36,6 +36,9 @@ module t (/*AUTOARG*/
    realtime  uninit;
    initial if (uninit != 0.0) $stop;
 
+   localparam int TWENTY = 20;
+   localparam real TWENDIV = $ceil((real'(TWENTY)-14.0)/2.0);
+
    sub_cast_bug374 sub (.cyc5(cyc[4:0]), .*);
 
    initial begin
@@ -94,6 +97,10 @@ module t (/*AUTOARG*/
       for (r=1.0; r<2.0; r=r+0.1) i++;
       if (i!=10) $stop;
       // bug
+      ci64 = $realtobits(1.444);
+      if (ci64 != 64'h3ff71a9fbe76c8b4) $stop;
+      r = $bitstoreal(64'h3ff71a9fbe76c8b4);
+      if (r != 1.444) $stop;
       r = $bitstoreal($realtobits(1.414));
       if (r != 1.414) $stop;
       // bug
@@ -163,6 +170,9 @@ module t (/*AUTOARG*/
       r = -$sqrt(-1.0);  // NaN
       s = $sformatf("%g", r);
       `checks(s, "nan");
+
+      if (real'(TWENTY) != 20.0) $stop;
+      if (TWENDIV != 3.0) $stop;
    end
 
    // Test loop

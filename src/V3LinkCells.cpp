@@ -23,19 +23,14 @@
 //              Link to module that instantiates it
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3LinkCells.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 #include "V3Parse.h"
 #include "V3SymTable.h"
 
-#include <algorithm>
-#include <map>
 #include <unordered_set>
 #include <vector>
 
@@ -52,6 +47,7 @@ public:
 };
 
 class LinkCellsVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(LinkCellsVertex, V3GraphVertex)
     AstNodeModule* const m_modp;
 
 public:
@@ -69,6 +65,7 @@ public:
 };
 
 class LibraryVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(LibraryVertex, V3GraphVertex)
 public:
     explicit LibraryVertex(V3Graph* graphp)
         : V3GraphVertex{graphp} {}
@@ -77,7 +74,7 @@ public:
 };
 
 void LinkCellsGraph::loopsMessageCb(V3GraphVertex* vertexp) {
-    if (const LinkCellsVertex* const vvertexp = dynamic_cast<LinkCellsVertex*>(vertexp)) {
+    if (const LinkCellsVertex* const vvertexp = vertexp->cast<LinkCellsVertex>()) {
         vvertexp->modp()->v3warn(E_UNSUPPORTED,
                                  "Unsupported: Recursive multiple modules (module instantiates "
                                  "something leading back to itself): "
@@ -163,15 +160,14 @@ private:
 
     // VISITs
     void visit(AstNetlist* nodep) override {
-        AstNode::user1ClearTree();
         readModNames();
         iterateChildren(nodep);
         // Find levels in graph
-        m_graph.removeRedundantEdges(&V3GraphEdge::followAlwaysTrue);
+        m_graph.removeRedundantEdgesMax(&V3GraphEdge::followAlwaysTrue);
         if (dumpGraphLevel()) m_graph.dumpDotFilePrefixed("linkcells");
         m_graph.rank();
         for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-            if (const LinkCellsVertex* const vvertexp = dynamic_cast<LinkCellsVertex*>(itp)) {
+            if (const LinkCellsVertex* const vvertexp = itp->cast<LinkCellsVertex>()) {
                 // +1 so we leave level 1  for the new wrapper we'll make in a moment
                 AstNodeModule* const modp = vvertexp->modp();
                 modp->level(vvertexp->rank() + 1);
@@ -450,6 +446,12 @@ private:
                 varp->isIfaceParent(true);
                 nodep->addNextHere(varp);
                 nodep->hasIfaceVar(true);
+            }
+            if (nodep->hasNoParens()) {
+                nodep->v3error("Interface instantiation "
+                               << nodep->prettyNameQ() << " requires parenthesis\n"
+                               << nodep->warnMore() << "... Suggest use '" << nodep->prettyName()
+                               << "()'");
             }
         }
         if (nodep->modp()) {  //

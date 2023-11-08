@@ -20,7 +20,9 @@
 #include "config_build.h"
 #include "verilatedos.h"
 
+#ifndef V3ERROR_NO_GLOBAL_
 #define V3ERROR_NO_GLOBAL_
+#endif
 #include "V3Error.h"
 
 //********************************************************************
@@ -115,11 +117,11 @@ public:
     }
 
     void dump() const {
-        cout << "#     ";
-        for (uint64_t i = 0; i < m_dataSize; i++) {
-            if (hits(i)) cout << "," << i;
+        std::cout << "#     ";
+        for (uint64_t i = 0; i < m_dataSize; ++i) {
+            if (hits(i)) std::cout << "," << i;
         }
-        cout << endl;
+        std::cout << std::endl;
     }
 };
 

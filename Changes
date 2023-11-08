@@ -8,7 +8,196 @@ The changes in each Verilator version are described below.  The
 contributors that suggested a given feature are shown in []. Thanks!
 
 
-Verilator 5.011 devel
+Verilator 5.019 devel
+==========================
+
+**Major:**
+
+* Support compilation with precompiled headers with Make and GCC or CLang.
+* Change include of systemc instead of systemc.h (#4622) (#4623). [Chih-Mao Chen]
+  This may require that SystemC programs add 'using namespace sc_core', 'using namespace sc_dt'.
+
+**Minor:**
+
+
+
+Verilator 5.018 2023-10-30
+==========================
+
+**Major:**
+
+* Support compilation with precompiled headers with Make and GCC or CLang.
+* Change include of systemc instead of systemc.h (#4622) (#4623). [Chih-Mao Chen]
+  This may require that SystemC programs add 'using namespace sc_core', 'using namespace sc_dt'.
+
+**Minor:**
+
+* Add SIDEEFFECT warning on mishandled side effect cases.
+* Add trace() API even when Verilated without --trace (#4462). [phelter]
+* Add warning on interface instantiation without parens (#4094). [Gökçe Aydos]
+* Add sv_vpi_user.h from IEEE 1800-2017 Annex M (#4606). [Marlon James]
+* Support 'disable fork' (#4125) (#4569). [Aleksander Kiryk, Antmicro Ltd.]
+* Support 'wait fork' (#4586). [Aleksander Kiryk, Antmicro Ltd.]
+* Support 'randc' (#4349).
+* Support assigning events (#4403). [Krzysztof Boroński]
+* Support resizing function call inout arguments (#4467).
+* Support NBAs in non-inlined functions/tasks (#4496) (#4572). [Krzysztof Bieganski, Antmicro Ltd.]
+* Support converting parameters inside modules to localparams (#4511). [Anthony Donlon]
+* Support concatenation of unpacked arrays (#4558). [Yutetsu TAKATSUKASA]
+* Support Clang 16 (#4592). [Mariusz Glebocki]
+* Support VPI variables of real and string data types (#4594). [Marlon James]
+* Support making VL_LOCK_SPINS configurable (#4599). [Geza Lore]
+* Change code --stats output (#4597). [Geza Lore]
+* Change --prof-exec infrastructure and report (#4602). [Geza Lore]
+* Change lint_off to not propagate upwards to files including where the lint_off is.
+* Optimize empty expression statements (#4544).
+* Optimize trace internals (#4610) (#4612). [Geza Lore]
+* Optimize internal performance issues (#4638). [Geza Lore]
+* Fix conversion of impure logical expressions to bit expressions (#487 partial) (#4437). [Ryszard Rozak, Antmicro Ltd.]
+* Fix enum functions in localparams (#3999). [Andrew Nolte]
+* Fix passing arguments by reference (#3385 partial) (#4489). [Ryszard Rozak, Antmicro Ltd.]
+* Fix multithreading handling to separate by code units that use/never use it (#4228). [Mariusz Glebocki, Antmicro Ltd.]
+* Fix usage of annotation options (#4486) (#4504). [Michal Czyz]
+* Fix detecting local vars in nested forks (#4493) (#4506). [Kamil Rakoczy]
+* Fix handling input file path separator (#4515) (#4516). [Anthony Donlon]
+* Fix mis-support for parameterized UDPs (#4518). [Anthony Donlon]
+* Fix constant conversion of $realtobits, $bitstoreal (#4522).  [Andrew Nolte]
+* Fix conversion of integers in $display '%e' (#4528). [muzafferkal]
+* Fix non-inlined interface tracing (#3984) (#4530). [Todd Strader]
+* Fix stream operations with operands of struct type (#4531) (#4532). [Ryszard Rozak, Antmicro Ltd.]
+* Fix 'this' in a constructor (#4533). [Ryszard Rozak, Antmicro Ltd.]
+* Fix stream shift operator of 32 bits (#4536). [Julien Faucher]
+* Fix object destruction after a copy constructor (#4540) (#4541). [Ryszard Rozak, Antmicro Ltd.]
+* Fix inlining of real functions miscasting (#4543). [Andrew Nolte]
+* Fix broken link error for enum references (#4551). [Anthony Donlon]
+* Fix logical expressions with class objects - caching in v3Const (#4552). [Ryszard Rozak, Antmicro Ltd.]
+* Fix using functions/tasks following class definition inside module (#4553). [Anthony Donlon]
+* Fix large constant buffer overflow (#4556). [Varun Koyyalagunta]
+* Fix instance arrays connecting to array of structs (#4557). [raphmaster]
+* Fix error message for invalid parameter overrides (#4559). [Anthony Donlon]
+* Fix shift to remove operation side effects (#4563).
+* Fix compile warning on unused member function variable (#4567).
+* Fix method narrowing conversion compiler error (#4568).
+* Fix interface comparison (#4570). [Krzysztof Bieganski, Antmicro Ltd.]
+* Fix dynamic triggers for named events (#4571). [Krzysztof Bieganski, Antmicro Ltd.]
+* Fix dictionaries with keys of class types (#4576). [Ryszard Rozak, Antmicro Ltd.]
+* Fix to not remap local assign intervals in forks (#4583). [Krzysztof Bieganski, Antmicro Ltd.]
+* Fix display optimization ignoring side effects (#4585).
+* Fix PLI/DPI user defined system task/function grammar (#4587) (#4588). [Quentin Corradi]
+* Fix fault on empty clocking block (#4593). [Alex Mykyta]
+* Fix creating implicit nets for inputs of gate primitives (#4603). [Geza Lore]
+* Fix try_put method of unbounded mailbox (#4608). [Ryszard Rozak, Antmicro Ltd.]
+* Fix stable name generation in V3Fork (#4615) (#4624). [Krzysztof Boroński]
+* Fix virtual methods (#4616). [Ryszard Rozak, Antmicro Ltd.]
+* Fix insertion at queue end (#4619). [Krzysztof Boroński]
+* Fix rand fields of reference types (#4627). [Ryszard Rozak, Antmicro Ltd.]
+* Fix dynamic casts of null values (#4631). [Ryszard Rozak, Antmicro Ltd.]
+* Fix signals read via virtual interfaces being misoptimized (#4645). [Krzysztof Bieganski, Antmicro Ltd.]
+* Fix handling of static keyword in methods (#4649). [Ryszard Rozak, Antmicro Ltd.]
+* Fix preprocessor to show `line 2 on resumed file.
+
+
+Verilator 5.016 2023-09-16
+==========================
+
+**Minor:**
+
+* Add prepareClone and atClone APIs for Verilated models (#3503) (#4444). [Yinan Xu]
+* Add check for conflicting options e.g. binary and lint-only (#4409). [Ethan Sifferman]
+* Add --no-trace-top to not trace top signals (#4412) (#4422). [Frans Skarman]
+* Support recursive function calls (#3267).
+* Support assignments of packed values to stream expressions on queues (#4401). [Ryszard Rozak, Antmicro Ltd]
+* Support no-parentheses calls to static methods (#4432). [Krzysztof Boroński]
+* Support block_item_declaration in forks (#4455). [Krzysztof Boroński]
+* Support assignments of stream expressions on queues to packed values (#4458). [Ryszard Rozak, Antmicro Ltd]
+* Support function non-constant default arguments (#4470).
+* Support 'let'.
+* Optimize Verilator executable size by refactoring error reporting routines (#4446). [Anthony Donlon]
+* Optimize Verilation runtime pointers and graphs (#4396) (#4397) (#4398). [Krzysztof Bieganski, Antmicro Ltd]
+* Optimize preparations towards multithreaded Verilation (#4291) (#4463) (#4476) (#4477) (#4479).  [Kamil Rakoczy, Antmicro Ltd]
+* Fix Windows filename format, etc (#3873) (#4421). [Anthony Donlon].
+* Fix t_dist_cppstyle Perl performance issue (#4085). [Srinivasan Venkataramanan]
+* Fix using type in parameterized classes without #() (#4281) (#4440). [Anthony Donlon]
+* Fix false INFINITELOOP on forever..mailbox.get() (#4323). [Srinivasan Venkataramanan]
+* Fix data type of condition operation on class objects (#4345) (#4352). [Ryszard Rozak, Antmicro Ltd]
+* Fix variables mutated under fork..join_none/join_any blocks into anonymous objects (#4356). [Krzysztof Boroński]
+* Fix V3CUse, do not consider implementations (.cpp) at all (#4386). [Krzysztof Boroński]
+* Fix ++/-- under statements (#4399). [Aleksander Kiryk, Antmicro Ltd]
+* Fix detection of mixed blocking and nonblocking assignment in nested assignments (#4404). [Ryszard Rozak, Antmicro Ltd]
+* Fix jumping over object initialization (#4411). [Krzysztof Boroński]
+* Fix multiple issues towards short circuit support (#4413) (#4460). [Ryszard Rozak, Antmicro Ltd]
+* Fix variable lifetimes in extern methods (#4414). [Krzysztof Boroński]
+* Fix multiple function definitions in V3Sched (#4416). [Hennadii Chernyshchyk]
+* Fix false UNUSEDPARAM on generate localparam (#4427). [Bill Pringlemeir]
+* Fix checking for parameter and port connections in the wrong place (#4428). [Anthony Donlon]
+* Fix coroutine handle movement during queue manipulation (#4431). [Aleksander Kiryk, Antmicro Ltd]
+* Fix nested assignments on the LHS (#4435). [Ryszard Rozak, Antmicro Ltd]
+* Fix false MULTITOP on bound interfaces (#4438). [Alex Solomatnikov]
+* Fix internal error on real conversion (#4447). [vdhotre-ventana]
+* Fix lifetime unknown error on enum.name (#4448). [jwoutersymatra]
+* Fix unstable output of VHashSha256 (#4453). [Anthony Donlon]
+* Fix static cast from a stream type (#4469) (#4485). [Ryszard Rozak, Antmicro Ltd]
+* Fix error on enum with VARHIDDEN of cell (#4482). [Michail Rontionov]
+* Fix lint of case statements with enum and wildcard bits (#4464) (#4487). [Anthony Donlon]
+* Fix reference to extended class in parameterized class (#4466).
+* Fix recursive display causing segfault (#4480). [Kuoping Hsu]
+* Fix the error message when the type of ref argument is wrong (#4490). [Ryszard Rozak, Antmicro Ltd]
+* Fix display %x formatting of real.
+* Fix mis-warning on #() in classes' own functions.
+* Fix IGNOREDRETURN to not warn on void-cast static function calls.
+* Fix ZERODLY to not warn on 'wait(0)'.
+
+
+Verilator 5.014 2023-08-06
+==========================
+
+**Minor:**
+
+* Deprecation planned for 32-bit pointer -m32 mode (#4268).
+* Deprecate CMake config below version 3.13 (#4389) (#4390). [Vito Gamberini]
+* Support some stream operations on queues (#4292). [Ryszard Rozak, Antmicro Ltd]
+* Support property declaration with empty parentheses (#4313) (#4317). [Anthony Donlon]
+* Support locator methods with "with" on assoc arrays (#4335). [Ryszard Rozak, Antmicro Ltd]
+* Support string replication with variable (#4341). [Aleksander Kiryk, Antmicro Ltd]
+* Support more types in wait (#4374). [Aleksander Kiryk, Antmicro Ltd]
+* Support static method calls as default values of function arguments (#4378). [Ryszard Rozak, Antmicro Ltd]
+* Add GENUNNAMED lint warning. [Srinivasan Venkataramanan, Deepa Palaniappan]
+* Add MISINDENT lint warning for misleading indentation.
+* Fix 'VlForkSync' redeclaration (#4277). [Krzysztof Bieganski, Antmicro Ltd]
+* Fix processes that can outlive their parents (#4253). [Krzysztof Boronski, Antmicro Ltd]
+* Fix duplicate fork names (#4295). [Ryszard Rozak, Antmicro Ltd]
+* Fix splitting coroutines (#4297) (#4307). [Jiamin Zhu]
+* Fix error when multiple duplicate DPI exports (#4301).
+* Fix class reference assignment checking (#4296). [Ryszard Rozak, Antmicro Ltd]
+* Fix handling of ref types in initial values of type parameters (#4304). [Ryszard Rozak, Antmicro Ltd]
+* Fix comparison of string parameters (#4308). [Ryszard Rozak, Antmicro Ltd]
+* Fix state update for always processes (#4311). [Aleksander Kiryk, Antmicro Ltd]
+* Fix multiple edge timing controls in class methods (#4318) (#4320) (#4344). [Krzysztof Bieganski, Antmicro Ltd]
+* Fix implicit calls of base class constructors with optional arguments (#4319). [Ryszard Rozak, Antmicro Ltd]
+* Fix propagation of process requirement (#4321). [Krzysztof Boroński]
+* Fix unhandled overloads in V3InstrCount (#4324). [Krzysztof Boroński]
+* Fix selects of static members (#4326). [Ryszard Rozak, Antmicro Ltd]
+* Fix references to members of results of static methods (#4327). [Ryszard Rozak, Antmicro Ltd]
+* Fix unique..with method on queues of class objects (#4328). [Ryszard Rozak, Antmicro Ltd]
+* Fix queue slicing (#4329). [Aleksander Kiryk, Antmicro Ltd]
+* Fix wildcard referring types (#4336) (#4342). [Aleksander Kiryk, Antmicro Ltd]
+* Fix comparison of class objects (#4346). [Ryszard Rozak, Antmicro Ltd]
+* Fix unexpected RefDType on assoc arrays (#4337). [Aleksander Kiryk, Antmicro Ltd]
+* Fix cmake astgen for Rocky Linux 8.7 (#4343). [Julian Daube]
+* Fix class timescale in class packages (#4348). [Krzysztof Bieganski, Antmicro Ltd]
+* Fix string concatenations (#4354). [Ryszard Rozak, Antmicro Ltd]
+* Fix unlinked task error from broken context (#4355) (#4402). [Aleksander Kiryk, Antmicro Ltd]
+* Fix selects on unpacked structs (#4359). [Ryszard Rozak, Antmicro Ltd]
+* Fix select operation on assoc array with wide keys (#4360). [Ryszard Rozak, Antmicro Ltd]
+* Fix non-public methods with wide output (#4364). [Ryszard Rozak, Antmicro Ltd]
+* Fix handling of super.new calls (#4366). [Ryszard Rozak, Antmicro Ltd]
+* Fix assign to input var in methods (#4367). [Aleksander Kiryk, Antmicro Ltd]
+* Fix VlProcess not found (#4368). [Aleksander Kiryk, Antmicro Ltd]
+* Fix order of evaluation of function calls in statements (#4375). [Ryszard Rozak, Antmicro Ltd]
+* Fix config_build.h issues (#4380) (#4381). [Andrew Miloradovsky]
+
+
+Verilator 5.012 2023-06-13
 ==========================
 
 **Major:**
@@ -18,10 +207,15 @@ Verilator 5.011 devel
 
 **Minor:**
 
+* Add --main-top-name option for C main TOP name (#4235) (#4249). [Don Williamson]
+* Add creating __inputs.vpp file with --debug (#4177). [Tudor Timi]
+* Add NEWERSTD warning when using feature in newer language standard (#4168) (#4172). [Ethan Sifferman]
+* Add warning that timing controls in DPI exports are unsupported (#4238). [Krzysztof Bieganski, Antmicro Ltd]
+* Support std::process class (#4212). [Aleksander Kiryk, Antmicro Ltd]
 * Support inside expressions with strings and doubles (#4138) (#4139). [Krzysztof Boroński]
 * Support get_randstate/set_randstate class method functions.
-* Add NEWERSTD warning when using feature in newer language standard (#4168) (#4172). [Ethan Sifferman]
-* Add creating __inputs.vpp file with --debug (#4177). [Tudor Timi]
+* Support for condition operator on class objects (#4214). [Ryszard Rozak, Antmicro Ltd]
+* Support array max (#4275). [Aleksander Kiryk, Antmicro Ltd]
 * Optimize VPI callValueCbs (#4155). [Hennadii Chernyshchyk]
 * Configure for faster C++ linking using 'mold', if it is installed.
 * Fix crash on duplicate imported modules (#3231). [Robert Balas]
@@ -40,12 +234,28 @@ Verilator 5.011 devel
 * Fix forced assignments that override non-continuous assignments (#4183) (#4192). [Krzysztof Bieganski, Antmicro Ltd]
 * Fix wide structure VL_TOSTRING_W generation (#4188) (#4189). [Aylon Chaim Porat]
 * Fix references to members of parameterized base classes (#4196). [Ryszard Rozak, Antmicro Ltd]
+* Fix tracing undefined alignment (#4201) (#4288) [John Wehle]
+* Fix class specific same methods for AstVarScope, AstVar, and AstScope (#4203) (#4250). [John Wehle]
 * Fix dotted references in parameterized classes (#4206). [Ryszard Rozak, Antmicro Ltd]
 * Fix bit selections under parameterized classes (#4210). [Ryszard Rozak, Antmicro Ltd]
 * Fix duplicate std:: declaration with -I (#4215). [Harald Pretl]
 * Fix deep traversal of class inheritance timing (#4216). [Krzysztof Boroński]
 * Fix class parameters of enum types (#4219). [Ryszard Rozak, Antmicro Ltd]
+* Fix static methods with prototypes (#4220). [Ryszard Rozak, Antmicro Ltd]
+* Fix LATCH warning on function local variables (#4221) (#4284) [Julien Margetts]
+* Fix VCD scope types (#4227) (#4282). [Àlex Torregrosa]
+* Fix incorrect multi-driven lint warning (#4231) (#4248). [Adrien Le Masle]
 * Fix missing assignment for wide unpacked structs (#4233). [Jiamin Zhu]
+* Fix unpacked struct == and != operators (#4234) (#4240). [Risto Pejašinović]
+* Fix AstStructSel clean when data type is structure (#4241) (#4244). [Risto Pejašinović]
+* Fix function calls in with statements (#4245). [Ryszard Rozak, Antmicro Ltd]
+* Fix operator == for unpacked struct, if elements are VlUnpacked arrays (#4247). [Risto Pejašinović]
+* Fix STATIC lifetime for variables created from clocking items (#4262). [Krzysztof Boroński]
+* Fix names of foreach blocks (#4264). [Ryszard Rozak, Antmicro Ltd]
+* Fix iterated variables in foreach loops to have VAUTOM lifetimes (#4265). [Krzysztof Boroński]
+* Fix missing assignment for wide class members (#4267). [Jiamin Zhu]
+* Fix the global uses timing flag when forks exist (#4274). [Krzysztof Bieganski, Antmicro Ltd]
+* Fix struct redefinition (#4276). [Aleksander Kiryk, Antmicro Ltd]
 * Fix detection of wire/reg duplicates.
 * Fix false IMPLICITSTATIC on package functions.
 * Fix method calls on function return values.

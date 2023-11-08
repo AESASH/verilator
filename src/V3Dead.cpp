@@ -33,15 +33,10 @@
 // here after scoping to allow more dead node removal.
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Dead.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
-
-#include <map>
 #include <vector>
 
 VL_DEFINE_DEBUG_FUNCTIONS;
@@ -288,7 +283,6 @@ private:
             VL_RESTORER(m_sideEffect);
             m_inAssign = true;
             m_sideEffect = false;
-            if (assignInAssign) m_sideEffect = true;
             iterateAndNextNull(nodep->rhsp());
             checkAll(nodep);
             // Has to be direct assignment without any EXTRACTing.
@@ -532,6 +526,7 @@ public:
 
         // We may have removed some datatypes, cleanup
         nodep->typeTablep()->repairCache();
+        VIsCached::clearCacheTree();  // Removing assignments may affect isPure
     }
     ~DeadVisitor() override = default;
 };

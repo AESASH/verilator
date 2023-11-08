@@ -33,6 +33,7 @@
 #include <atomic>
 #include <deque>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -69,9 +70,75 @@ extern std::string VL_TO_STRING_W(int words, const WDataInP obj);
 #define VL_INOUTW(name, msb, lsb, words) VlWide<words> name  ///< Declare bidir signal, 65+ bits
 #define VL_OUT8(name, msb, lsb) CData name  ///< Declare output signal, 1-8 bits
 #define VL_OUT16(name, msb, lsb) SData name  ///< Declare output signal, 9-16 bits
-#define VL_OUT64(name, msb, lsb) QData name  ///< Declare output signal, 33-64bits
+#define VL_OUT64(name, msb, lsb) QData name  ///< Declare output signal, 33-64 bits
 #define VL_OUT(name, msb, lsb) IData name  ///< Declare output signal, 17-32 bits
 #define VL_OUTW(name, msb, lsb, words) VlWide<words> name  ///< Declare output signal, 65+ bits
+
+//===================================================================
+// Functions needed here
+
+constexpr IData VL_CLOG2_CE_Q(QData lhs) VL_PURE {
+    // constexpr usage only! Recuses to meet C++11 constexpr func limitations
+    return lhs <= 1 ? 0 : VL_CLOG2_CE_Q((lhs + 1) >> 1ULL) + 1;
+}
+
+// Metadata of processes
+class VlProcess;
+
+using VlProcessRef = std::shared_ptr<VlProcess>;
+
+class VlProcess final {
+    // MEMBERS
+    int m_state;  // Current state of the process
+    VlProcessRef m_parentp = nullptr;  // Parent process, if exists
+    std::set<VlProcess*> m_children;  // Active child processes
+
+public:
+    // TYPES
+    enum : int {  // Type int for compatibility with $c
+        FINISHED = 0,
+        RUNNING = 1,
+        WAITING = 2,
+        SUSPENDED = 3,
+        KILLED = 4,
+    };
+
+    // CONSTRUCTORS
+    // Construct independent process
+    VlProcess()
+        : m_state{RUNNING} {}
+    // Construct child process of parent
+    VlProcess(VlProcessRef parentp)
+        : m_state{RUNNING}
+        , m_parentp{parentp} {
+        m_parentp->attach(this);
+    }
+
+    ~VlProcess() {
+        if (m_parentp) m_parentp->detach(this);
+    }
+
+    void attach(VlProcess* childp) { m_children.insert(childp); }
+    void detach(VlProcess* childp) { m_children.erase(childp); }
+
+    int state() const { return m_state; }
+    void state(int s) { m_state = s; }
+    void disable() {
+        state(KILLED);
+        disableFork();
+    }
+    void disableFork() {
+        for (VlProcess* childp : m_children) childp->disable();
+    }
+    bool completed() const { return state() == FINISHED || state() == KILLED; }
+    bool completedFork() const {
+        for (const VlProcess* const childp : m_children)
+            if (!childp->completed()) return false;
+        return true;
+    }
+};
+
+inline std::string VL_TO_STRING(const VlProcessRef& p) { return std::string("process"); }
 
 //===================================================================
 // Activity trigger vector
@@ -125,7 +192,18 @@ public:
 //===================================================================
 // SystemVerilog event type
 
-class VlEvent final {
+class VlEventBase VL_NOT_FINAL {
+public:
+    virtual ~VlEventBase() = default;
+
+    virtual void fire() = 0;
+    virtual bool isFired() const = 0;
+    virtual bool isTriggered() const = 0;
+    virtual void clearFired() = 0;
+    virtual void clearTriggered() = 0;
+};
+
+class VlEvent final : public VlEventBase {
     // MEMBERS
     bool m_fired = false;  // Fired on this scheduling iteration
     bool m_triggered = false;  // Triggered state of event persisting until next time step
@@ -133,17 +211,47 @@ class VlEvent final {
 public:
     // CONSTRUCTOR
     VlEvent() = default;
-    ~VlEvent() = default;
+    ~VlEvent() override = default;
 
+    friend std::string VL_TO_STRING(const VlEvent& e);
+    friend class VlAssignableEvent;
     // METHODS
-    void fire() { m_fired = m_triggered = true; }
-    bool isFired() const { return m_fired; }
-    bool isTriggered() const { return m_triggered; }
-    void clearFired() { m_fired = false; }
-    void clearTriggered() { m_triggered = false; }
+    void fire() override { m_fired = m_triggered = true; }
+    bool isFired() const override { return m_fired; }
+    bool isTriggered() const override { return m_triggered; }
+    void clearFired() override { m_fired = false; }
+    void clearTriggered() override { m_triggered = false; }
 };
 
+class VlAssignableEvent final : public std::shared_ptr<VlEvent>, public VlEventBase {
+public:
+    // Constructor
+    VlAssignableEvent()
+        : std::shared_ptr<VlEvent>(new VlEvent) {}
+    ~VlAssignableEvent() override = default;
+
+    // METHODS
+    void fire() override { (*this)->m_fired = (*this)->m_triggered = true; }
+    bool isFired() const override { return (*this)->m_fired; }
+    bool isTriggered() const override { return (*this)->m_triggered; }
+    void clearFired() override { (*this)->m_fired = false; }
+    void clearTriggered() override { (*this)->m_triggered = false; }
+};
+
+inline std::string VL_TO_STRING(const VlEventBase& e);
+
 inline std::string VL_TO_STRING(const VlEvent& e) {
+    return std::string{"triggered="} + (e.isTriggered() ? "true" : "false");
+}
+
+inline std::string VL_TO_STRING(const VlAssignableEvent& e) {
+    return "&{ " + VL_TO_STRING(*e) + " }";
+}
+
+inline std::string VL_TO_STRING(const VlEventBase& e) {
+    if (const VlAssignableEvent& assignable = dynamic_cast<const VlAssignableEvent&>(e)) {
+        return VL_TO_STRING(assignable);
+    }
     return std::string{"triggered="} + (e.isTriggered() ? "true" : "false");
 }
 
@@ -178,6 +286,58 @@ public:
     static constexpr size_t min() { return 0; }
     static constexpr size_t max() { return 1ULL << 31; }
     size_t operator()() { return VL_MASK_I(31) & vl_rand64(); }
+};
+
+template <class T_Value, uint64_t T_numValues>
+class VlRandC final {
+    T_Value m_remaining = 0;  // Number of values to pull before re-randomize
+    T_Value m_lfsr = 1;  // LFSR state
+
+public:
+    // CONSTRUCTORS
+    VlRandC() {
+        static_assert(T_numValues >= 1, "");
+        static_assert(sizeof(T_Value) == 8 || (T_numValues < (1ULL << (8 * sizeof(T_Value)))), "");
+    }
+    // METHODS
+    T_Value randomize(VlRNG& rngr) {
+        if (VL_UNLIKELY(!m_remaining)) reseed(rngr);
+        // Polynomials are first listed at https://users.ece.cmu.edu/~koopman/lfsr/
+        static constexpr uint64_t s_polynomials[] = {
+            0x0ULL,  // 0 never used (constant, no randomization)
+            0x0ULL,  // 1
+            0x3ULL,        0x5ULL,       0x9ULL,        0x12ULL,       0x21ULL,
+            0x41ULL,       0x8eULL,      0x108ULL,      0x204ULL,      0x402ULL,
+            0x829ULL,      0x100dULL,    0x2015ULL,     0x4001ULL,
+            0x8016ULL,  // 16
+            0x10004ULL,    0x20040ULL,   0x40013ULL,    0x80004ULL,    0x100002ULL,
+            0x200001ULL,   0x400010ULL,  0x80000dULL,   0x1000004ULL,  0x2000023ULL,
+            0x4000013ULL,  0x8000004ULL, 0x10000002ULL, 0x20000029ULL, 0x40000004ULL,
+            0x80000057ULL,  // 32
+            0x100000029ULL  // 33
+        };
+        constexpr uint32_t clogWidth = VL_CLOG2_CE_Q(T_numValues) + 1;
+        constexpr uint32_t lfsrWidth = (clogWidth < 2) ? 2 : clogWidth;
+        constexpr T_Value polynomial = static_cast<T_Value>(s_polynomials[lfsrWidth]);
+        // printf("  numV=%ld w=%d poly=%x\n", T_numValues, lfsrWidth, polynomial);
+        //  Loop until get reasonable value. Because we picked a LFSR of at most one
+        //  extra bit in width, this will only require at most on average 1.5 loops
+        do {
+            m_lfsr = (m_lfsr & 1ULL) ? ((m_lfsr >> 1ULL) ^ polynomial) : (m_lfsr >> 1ULL);
+        } while (m_lfsr > T_numValues);  // Note if == then output value 0
+        --m_remaining;
+        T_Value result = (m_lfsr == T_numValues) ? 0 : m_lfsr;
+        // printf("    result=%x  (numv=%ld, rem=%d)\n", result, T_numValues, m_remaining);
+        return result;
+    }
+    void reseed(VlRNG& rngr) {
+        constexpr uint32_t lfsrWidth = VL_CLOG2_CE_Q(T_numValues) + 1;
+        m_remaining = T_numValues;
+        do {
+            m_lfsr = rngr.rand64() & VL_MASK_Q(lfsrWidth);
+            // printf("    lfsr.reseed=%x\n", m_lfsr);
+        } while (!m_lfsr);  // 0 not a legal seed
+    }
 };
 
 // These require the class object to have the thread safety lock
@@ -427,7 +587,7 @@ public:
 
     // function void q.insert(index, value);
     void insert(int32_t index, const T_Value& value) {
-        if (VL_UNLIKELY(index < 0 || index >= m_deque.size())) return;
+        if (VL_UNLIKELY(index < 0 || index > m_deque.size())) return;
         m_deque.insert(m_deque.begin() + index, value);
     }
 
@@ -487,7 +647,7 @@ public:
     template <typename Func>
     VlQueue unique(Func with_func) const {
         VlQueue out;
-        std::set<T_Value> saw;
+        std::set<decltype(with_func(0, m_deque[0]))> saw;
         for (const auto& i : m_deque) {
             const auto i_mapped = with_func(0, i);
             const auto it = saw.find(i_mapped);
@@ -516,7 +676,7 @@ public:
     VlQueue<IData> unique_index(Func with_func) const {
         VlQueue<IData> out;
         IData index = 0;
-        std::unordered_set<T_Value> saw;
+        std::set<decltype(with_func(0, m_deque[0]))> saw;
         for (const auto& i : m_deque) {
             const auto i_mapped = with_func(index, i);
             auto it = saw.find(i_mapped);
@@ -830,6 +990,22 @@ public:
         }
         return out;
     }
+    template <typename Func>
+    VlQueue<T_Value> unique(Func with_func) const {
+        VlQueue<T_Value> out;
+        T_Key default_key;
+        using WithType = decltype(with_func(m_map.begin()->first, m_map.begin()->second));
+        std::set<WithType> saw;
+        for (const auto& i : m_map) {
+            const auto i_mapped = with_func(default_key, i.second);
+            const auto it = saw.find(i_mapped);
+            if (it == saw.end()) {
+                saw.insert(it, i_mapped);
+                out.push_back(i.second);
+            }
+        }
+        return out;
+    }
     VlQueue<T_Key> unique_index() const {
         VlQueue<T_Key> out;
         std::set<T_Key> saw;
@@ -837,6 +1013,21 @@ public:
             auto it = saw.find(i.second);
             if (it == saw.end()) {
                 saw.insert(it, i.second);
+                out.push_back(i.first);
+            }
+        }
+        return out;
+    }
+    template <typename Func>
+    VlQueue<T_Key> unique_index(Func with_func) const {
+        VlQueue<T_Key> out;
+        using WithType = decltype(with_func(m_map.begin()->first, m_map.begin()->second));
+        std::set<WithType> saw;
+        for (const auto& i : m_map) {
+            const auto i_mapped = with_func(i.first, i.second);
+            auto it = saw.find(i_mapped);
+            if (it == saw.end()) {
+                saw.insert(it, i_mapped);
                 out.push_back(i.first);
             }
         }
@@ -903,12 +1094,32 @@ public:
             });
         return VlQueue<T_Value>::cons(it->second);
     }
+    template <typename Func>
+    VlQueue<T_Value> min(Func with_func) const {
+        if (m_map.empty()) return VlQueue<T_Value>();
+        const auto it = std::min_element(
+            m_map.begin(), m_map.end(),
+            [&with_func](const std::pair<T_Key, T_Value>& a, const std::pair<T_Key, T_Value>& b) {
+                return with_func(a.first, a.second) < with_func(b.first, b.second);
+            });
+        return VlQueue<T_Value>::cons(it->second);
+    }
     VlQueue<T_Value> max() const {
         if (m_map.empty()) return VlQueue<T_Value>();
         const auto it = std::max_element(
             m_map.begin(), m_map.end(),
             [](const std::pair<T_Key, T_Value>& a, const std::pair<T_Key, T_Value>& b) {
                 return a.second < b.second;
+            });
+        return VlQueue<T_Value>::cons(it->second);
+    }
+    template <typename Func>
+    VlQueue<T_Value> max(Func with_func) const {
+        if (m_map.empty()) return VlQueue<T_Value>();
+        const auto it = std::max_element(
+            m_map.begin(), m_map.end(),
+            [&with_func](const std::pair<T_Key, T_Value>& a, const std::pair<T_Key, T_Value>& b) {
+                return with_func(a.first, a.second) < with_func(b.first, b.second);
             });
         return VlQueue<T_Value>::cons(it->second);
     }
@@ -1040,9 +1251,15 @@ void VL_WRITEMEM_N(bool hex, int bits, const std::string& filename,
 
 template <class T_Value, std::size_t T_Depth>
 struct VlUnpacked final {
+private:
+    // TYPES
+    using T_Key = IData;  // Index type, for uniformity with other containers
+    using Unpacked = T_Value[T_Depth];
+
+public:
     // MEMBERS
     // This should be the only data member, otherwise generated static initializers need updating
-    T_Value m_storage[T_Depth];  // Contents of the unpacked array
+    Unpacked m_storage;  // Contents of the unpacked array
 
     // CONSTRUCTORS
     // Default constructors and destructor are used. Note however that C++20 requires that
@@ -1053,6 +1270,7 @@ struct VlUnpacked final {
     // Default copy assignment operators are used.
 
     // METHODS
+public:
     // Raw access
     WData* data() { return &m_storage[0]; }
     const WData* data() const { return &m_storage[0]; }
@@ -1065,6 +1283,170 @@ struct VlUnpacked final {
     bool neq(const VlUnpacked<T_Value, T_Depth>& that) const { return neq(*this, that); }
     // Similar to 'neq' above, *this = that used for change detection
     void assign(const VlUnpacked<T_Value, T_Depth>& that) { *this = that; }
+    bool operator==(const VlUnpacked<T_Value, T_Depth>& that) const { return !neq(that); }
+    bool operator!=(const VlUnpacked<T_Value, T_Depth>& that) { return neq(that); }
+
+    void sort() { std::sort(std::begin(m_storage), std::end(m_storage)); }
+    template <typename Func>
+    void sort(Func with_func) {
+        // with_func returns arbitrary type to use for the sort comparison
+        std::sort(std::begin(m_storage), std::end(m_storage),
+                  [=](const T_Value& a, const T_Value& b) {
+                      // index number is meaningless with sort, as it changes
+                      return with_func(0, a) < with_func(0, b);
+                  });
+    }
+    // std::rbegin/std::rend not available until C++14
+    void rsort() {
+        std::sort(std::begin(m_storage), std::end(m_storage), std::greater<T_Value>());
+    }
+    template <typename Func>
+    void rsort(Func with_func) {
+        // with_func returns arbitrary type to use for the sort comparison
+        // std::rbegin/std::rend not available until C++14, so using > below
+        std::sort(std::begin(m_storage), std::end(m_storage),
+                  [=](const T_Value& a, const T_Value& b) {
+                      // index number is meaningless with sort, as it changes
+                      return with_func(0, a) > with_func(0, b);
+                  });
+    }
+    void reverse() { std::reverse(std::begin(m_storage), std::end(m_storage)); }
+    void shuffle() { std::shuffle(std::begin(m_storage), std::end(m_storage), VlURNG{}); }
+    VlQueue<T_Value> unique() const {
+        VlQueue<T_Value> out;
+        std::set<T_Value> saw;
+        for (const auto& i : m_storage) {
+            const auto it = saw.find(i);
+            if (it == saw.end()) {
+                saw.insert(it, i);
+                out.push_back(i);
+            }
+        }
+        return out;
+    }
+    template <typename Func>
+    VlQueue<T_Value> unique(Func with_func) const {
+        VlQueue<T_Value> out;
+        std::set<T_Value> saw;
+        for (const auto& i : m_storage) {
+            const auto i_mapped = with_func(0, i);
+            const auto it = saw.find(i_mapped);
+            if (it == saw.end()) {
+                saw.insert(it, i_mapped);
+                out.push_back(i);
+            }
+        }
+        return out;
+    }
+    VlQueue<T_Key> unique_index() const {
+        VlQueue<T_Key> out;
+        IData index = 0;
+        std::set<T_Value> saw;
+        for (const auto& i : m_storage) {
+            const auto it = saw.find(i);
+            if (it == saw.end()) {
+                saw.insert(it, i);
+                out.push_back(index);
+            }
+            ++index;
+        }
+        return out;
+    }
+    template <typename Func>
+    VlQueue<T_Key> unique_index(Func with_func) const {
+        VlQueue<T_Key> out;
+        IData index = 0;
+        std::unordered_set<T_Value> saw;
+        for (const auto& i : m_storage) {
+            const auto i_mapped = with_func(index, i);
+            auto it = saw.find(i_mapped);
+            if (it == saw.end()) {
+                saw.insert(it, i_mapped);
+                out.push_back(index);
+            }
+            ++index;
+        }
+        return out;
+    }
+    template <typename Func>
+    VlQueue<T_Value> find(Func with_func) const {
+        VlQueue<T_Value> out;
+        IData index = 0;
+        for (const auto& i : m_storage) {
+            if (with_func(index, i)) out.push_back(i);
+            ++index;
+        }
+        return out;
+    }
+    template <typename Func>
+    VlQueue<T_Key> find_index(Func with_func) const {
+        VlQueue<T_Key> out;
+        IData index = 0;
+        for (const auto& i : m_storage) {
+            if (with_func(index, i)) out.push_back(index);
+            ++index;
+        }
+        return out;
+    }
+    template <typename Func>
+    VlQueue<T_Value> find_first(Func with_func) const {
+        // Can't use std::find_if as need index number
+        IData index = 0;
+        for (const auto& i : m_storage) {
+            if (with_func(index, i)) return VlQueue<T_Value>::cons(i);
+            ++index;
+        }
+        return VlQueue<T_Value>{};
+    }
+    template <typename Func>
+    VlQueue<T_Key> find_first_index(Func with_func) const {
+        IData index = 0;
+        for (const auto& i : m_storage) {
+            if (with_func(index, i)) return VlQueue<IData>::cons(index);
+            ++index;
+        }
+        return VlQueue<T_Key>{};
+    }
+    template <typename Func>
+    VlQueue<T_Value> find_last(Func with_func) const {
+        for (int i = T_Depth - 1; i >= 0; i--) {
+            if (with_func(i, m_storage[i])) return VlQueue<T_Value>::cons(m_storage[i]);
+        }
+        return VlQueue<T_Value>{};
+    }
+    template <typename Func>
+    VlQueue<T_Key> find_last_index(Func with_func) const {
+        for (int i = T_Depth - 1; i >= 0; i--) {
+            if (with_func(i, m_storage[i])) return VlQueue<IData>::cons(i);
+        }
+        return VlQueue<T_Key>{};
+    }
+
+    // Reduction operators
+    VlQueue<T_Value> min() const {
+        const auto it = std::min_element(std::begin(m_storage), std::end(m_storage));
+        return VlQueue<T_Value>::cons(*it);
+    }
+    template <typename Func>
+    VlQueue<T_Value> min(Func with_func) const {
+        const auto it = std::min_element(std::begin(m_storage), std::end(m_storage),
+                                         [&with_func](const IData& a, const IData& b) {
+                                             return with_func(0, a) < with_func(0, b);
+                                         });
+        return VlQueue<T_Value>::cons(*it);
+    }
+    VlQueue<T_Value> max() const {
+        const auto it = std::max_element(std::begin(m_storage), std::end(m_storage));
+        return VlQueue<T_Value>::cons(*it);
+    }
+    template <typename Func>
+    VlQueue<T_Value> max(Func with_func) const {
+        const auto it = std::max_element(std::begin(m_storage), std::end(m_storage),
+                                         [&with_func](const IData& a, const IData& b) {
+                                             return with_func(0, a) < with_func(0, b);
+                                         });
+        return VlQueue<T_Value>::cons(*it);
+    }
 
     // Dumping. Verilog: str = $sformatf("%p", assoc)
     std::string to_string() const {
@@ -1166,8 +1548,8 @@ class VlClass VL_NOT_FINAL : public VlDeletable {
 
 public:
     // CONSTRUCTORS
-    VlClass() = default;
-    VlClass(const VlClass& copied) {}
+    VlClass() { refCountInc(); }
+    VlClass(const VlClass& copied) { refCountInc(); }
     ~VlClass() override = default;
 };
 
@@ -1215,8 +1597,9 @@ public:
         // () required here to avoid narrowing conversion warnings,
         // when a new() has an e.g. CData type and passed a 1U.
         : m_objp{new T_Class(std::forward<T_Args>(args)...)} {
+        // refCountInc was moved to the constructor of T_Class
+        // to fix self references in constructor.
         m_objp->m_deleterp = &deleter;
-        refCountInc();
     }
     // Explicit to avoid implicit conversion from 0
     explicit VlClassRef(T_Class* objp)
@@ -1286,12 +1669,26 @@ public:
     // For 'if (ptr)...'
     operator bool() const { return m_objp; }
     // In SV A == B iff both are handles to the same object (IEEE 1800-2017 8.4)
-    bool operator==(const VlClassRef& rhs) const { return m_objp == rhs.m_objp; };
-    bool operator!=(const VlClassRef& rhs) const { return m_objp != rhs.m_objp; };
+    template <typename T_OtherClass>
+    bool operator==(const VlClassRef<T_OtherClass>& rhs) const {
+        return m_objp == rhs.m_objp;
+    };
+    template <typename T_OtherClass>
+    bool operator!=(const VlClassRef<T_OtherClass>& rhs) const {
+        return m_objp != rhs.m_objp;
+    };
+    template <typename T_OtherClass>
+    bool operator<(const VlClassRef<T_OtherClass>& rhs) const {
+        return m_objp < rhs.m_objp;
+    };
 };
 
 template <typename T, typename U>
 static inline bool VL_CAST_DYNAMIC(VlClassRef<T> in, VlClassRef<U>& outr) {
+    if (!in) {
+        outr = VlNull{};
+        return true;
+    }
     VlClassRef<U> casted = in.template dynamicCast<U>();
     if (VL_LIKELY(casted)) {
         outr = casted;
@@ -1299,6 +1696,12 @@ static inline bool VL_CAST_DYNAMIC(VlClassRef<T> in, VlClassRef<U>& outr) {
     } else {
         return false;
     }
+}
+
+template <typename T>
+static inline bool VL_CAST_DYNAMIC(VlNull in, VlClassRef<T>& outr) {
+    outr = VlNull{};
+    return true;
 }
 
 //=============================================================================

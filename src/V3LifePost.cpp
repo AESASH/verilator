@@ -24,13 +24,10 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3LifePost.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
 #include "V3GraphPathChecker.h"
 #include "V3PartitionGraph.h"
 #include "V3Stats.h"
@@ -255,8 +252,6 @@ private:
 
     // VISITORS
     void visit(AstTopScope* nodep) override {
-        AstNode::user4ClearTree();  // user4p() used on entire tree
-
         // First, build maps of every location (mtask and sequence
         // within the mtask) where each varscope is read, and written.
         iterateChildren(nodep);
@@ -333,7 +328,7 @@ private:
         }
         for (V3GraphVertex* mtaskVxp = nodep->depGraphp()->verticesBeginp(); mtaskVxp;
              mtaskVxp = mtaskVxp->verticesNextp()) {
-            const ExecMTask* const mtaskp = dynamic_cast<ExecMTask*>(mtaskVxp);
+            const ExecMTask* const mtaskp = mtaskVxp->as<ExecMTask>();
             m_execMTaskp = mtaskp;
             m_sequence = 0;
             iterate(mtaskp->bodyp());

@@ -19,8 +19,8 @@
 
 // clang-format off
 #include "config_build.h"
-#ifndef HAVE_CONFIG_BUILD
-# error "Something failed during ./configure as config_build.h is incomplete. Perhaps you used autoreconf, don't."
+#ifndef HAVE_CONFIG_PACKAGE
+# error "Something failed during ./configure as config_package.h is incomplete. Perhaps you used autoreconf, don't."
 #endif
 // clang-format on
 
@@ -28,7 +28,9 @@
 
 #include "V3Error.h"
 #include "V3FileLine.h"
+#include "V3Mutex.h"
 #include "V3Options.h"
+#include "V3ThreadSafety.h"
 
 #include <string>
 #include <unordered_map>
@@ -39,12 +41,13 @@ class V3HierBlockPlan;
 //======================================================================
 // Restorer
 
-/// Save a given variable's value on the stack, restoring it at
-/// end-of-stope.
+/// Save a given variable's value on the stack, restoring it at end-of-scope.
 // Object must be named, or it will not persist until end-of-scope.
 // Constructor needs () or GCC 4.8 false warning.
 #define VL_RESTORER(var) \
     const VRestorer<typename std::decay<decltype(var)>::type> restorer_##var(var);
+/// Get the copy of the variable previously saved by VL_RESTORER()
+#define VL_RESTORER_PREV(var) restorer_##var.saved()
 
 // Object used by VL_RESTORER.  This object must be an auto variable, not
 // allocated on the heap or otherwise.
@@ -58,6 +61,7 @@ public:
         : m_ref{permr}
         , m_saved{permr} {}
     ~VRestorer() { m_ref = m_saved; }
+    const T& saved() const { return m_saved; }
     VL_UNCOPYABLE(VRestorer);
 };
 
@@ -101,8 +105,9 @@ class V3Global final {
     std::atomic_int m_debugFileNumber{0};  // Number to append to debug files created
     bool m_assertDTypesResolved = false;  // Tree should have dtypep()'s
     bool m_assertScoped = false;  // Tree is scoped
+    bool m_assignsEvents = false;  // Design uses assignments on SystemVerilog Events
     bool m_constRemoveXs = false;  // Const needs to strip any Xs
-    // Experimenting with always requiring heavy, see (#2701)
+    // Experimenting with always requiring heavy, see issue #2701
     bool m_needTraceDumper = false;  // Need __Vm_dumperp in symbols
     bool m_dpi = false;  // Need __Dpi include files
     bool m_hasEvents = false;  // Design uses SystemVerilog named events
@@ -127,6 +132,7 @@ public:
     V3Global() {}
     void boot();
     void shutdown();  // Release allocated resources
+
     // ACCESSORS (general)
     AstNetlist* rootp() const VL_MT_SAFE { return m_rootp; }
     VWidthMinUsage widthMinUsage() const { return m_widthMinUsage; }
@@ -134,8 +140,8 @@ public:
     bool assertScoped() const { return m_assertScoped; }
 
     // METHODS
-    void readFiles();
-    void removeStd();
+    void readFiles() VL_MT_DISABLED;
+    void removeStd() VL_MT_DISABLED;
     void checkTree() const;
     static void dumpCheckGlobalTree(const string& stagename, int newNumber = 0,
                                     bool doDump = true);
@@ -150,6 +156,8 @@ public:
     void needTraceDumper(bool flag) { m_needTraceDumper = flag; }
     bool dpi() const VL_MT_SAFE { return m_dpi; }
     void dpi(bool flag) { m_dpi = flag; }
+    bool assignsEvents() const { return m_assignsEvents; }
+    void setAssignsEvents() { m_assignsEvents = true; }
     bool hasEvents() const { return m_hasEvents; }
     void setHasEvents() { m_hasEvents = true; }
     bool hasClasses() const { return m_hasClasses; }

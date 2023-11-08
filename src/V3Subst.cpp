@@ -22,13 +22,10 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Subst.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
 #include "V3Stats.h"
 
 #include <algorithm>
@@ -123,7 +120,7 @@ public:
         if (!m_varp->isWide() && !m_whole.m_complex && m_whole.m_assignp && !m_wordAssign) {
             const AstNodeAssign* const assp = m_whole.m_assignp;
             UASSERT_OBJ(assp, errp, "Reading whole that was never assigned");
-            return (assp->rhsp());
+            return assp->rhsp();
         } else {
             return nullptr;
         }
@@ -133,7 +130,7 @@ public:
         if (!m_whole.m_complex && !m_whole.m_assignp && !m_words[word].m_complex) {
             const AstNodeAssign* const assp = getWordAssignp(word);
             UASSERT_OBJ(assp, errp, "Reading a word that was never assigned, or bad word #");
-            return (assp->rhsp());
+            return assp->rhsp();
         } else {
             return nullptr;
         }
@@ -198,7 +195,10 @@ private:
         }
     }
     void visit(AstConst*) override {}  // Accelerate
-    void visit(AstNode* nodep) override { iterateChildren(nodep); }
+    void visit(AstNode* nodep) override {
+        if (!nodep->isPure()) m_ok = false;
+        iterateChildren(nodep);
+    }
 
 public:
     // CONSTRUCTORS
@@ -289,7 +289,7 @@ private:
     }
     void replaceSubstEtc(AstNode* nodep, AstNodeExpr* substp) {
         if (debug() > 5) nodep->dumpTree("-  substw_old: ");
-        AstNodeExpr* newp = substp->cloneTree(true);
+        AstNodeExpr* newp = substp->cloneTreePure(true);
         if (!nodep->isQuad() && newp->isQuad()) {
             newp = new AstCCast{newp->fileline(), newp, nodep};
         }

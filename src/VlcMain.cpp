@@ -15,16 +15,20 @@
 //*************************************************************************
 
 // clang-format off
+#define VL_MT_DISABLED_CODE_UNIT 1
+
 #include "config_build.h"
-#ifndef HAVE_CONFIG_BUILD
-# error "Something failed during ./configure as config_build.h is incomplete. Perhaps you used autoreconf, don't."
+#ifndef HAVE_CONFIG_PACKAGE
+# error "Something failed during ./configure as config_package.h is incomplete. Perhaps you used autoreconf, don't."
 #endif
 // clang-format on
 
 #include "verilatedos.h"
 
 // Cheat for speed and compile .cpp files into one object TODO: Reconsider
+#ifndef V3ERROR_NO_GLOBAL_
 #define V3ERROR_NO_GLOBAL_
+#endif
 #include "V3Error.h"
 static int debug() { return V3Error::debugDefault(); }
 #include "V3Error.cpp"
@@ -48,7 +52,7 @@ static int debug() { return V3Error::debugDefault(); }
 void VlcOptions::addReadFile(const string& filename) { m_readFiles.insert(filename); }
 
 string VlcOptions::version() {
-    string ver = DTVERSION;
+    string ver = PACKAGE_STRING;
     ver += " rev " + cvtToStr(DTVERSION_rev);
     return ver;
 }
@@ -98,18 +102,18 @@ void VlcOptions::parseOptsList(int argc, char** argv) {
 }
 
 void VlcOptions::showVersion(bool verbose) {
-    cout << version();
-    cout << endl;
+    std::cout << version();
+    std::cout << endl;
     if (!verbose) return;
 
-    cout << endl;
-    cout << "Copyright 2003-2023 by Wilson Snyder.  Verilator is free software; you can\n";
-    cout << "redistribute it and/or modify the Verilator internals under the terms of\n";
-    cout << "either the GNU Lesser General Public License Version 3 or the Perl Artistic\n";
-    cout << "License Version 2.0.\n";
+    std::cout << endl;
+    std::cout << "Copyright 2003-2023 by Wilson Snyder.  Verilator is free software; you can\n";
+    std::cout << "redistribute it and/or modify the Verilator internals under the terms of\n";
+    std::cout << "either the GNU Lesser General Public License Version 3 or the Perl Artistic\n";
+    std::cout << "License Version 2.0.\n";
 
-    cout << endl;
-    cout << "See https://verilator.org for documentation\n";
+    std::cout << endl;
+    std::cout << "See https://verilator.org for documentation\n";
 }
 
 //######################################################################

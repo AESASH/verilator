@@ -16,6 +16,7 @@
 
 // clang-format off
 #include "V3Error.h"
+#include "V3Os.h"
 #ifndef V3ERROR_NO_GLOBAL_
 # include "V3Ast.h"
 # include "V3Global.h"
@@ -222,20 +223,18 @@ void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
 #ifndef V3ERROR_NO_GLOBAL_
                 if (dumpTreeLevel() || debug()) {
                     V3Broken::allowMidvisitorCheck(true);
-                    V3ThreadPool::s().requestExclusiveAccess([&]() VL_REQUIRES(m_mutex) {
-                        if (dumpTreeLevel()) {
-                            v3Global.rootp()->dumpTreeFile(
-                                v3Global.debugFilename("final.tree", 990));
-                        }
-                        if (debug()) {
-                            execErrorExitCb();
-                            V3Stats::statsFinalAll(v3Global.rootp());
-                            V3Stats::statsReport();
-                        }
-                        // Abort in exclusive access to make sure other threads
-                        // don't change error code
-                        vlAbortOrExit();
-                    });
+                    const V3ThreadPool::ScopedExclusiveAccess exclusiveAccess;
+                    if (dumpTreeLevel()) {
+                        v3Global.rootp()->dumpTreeFile(v3Global.debugFilename("final.tree", 990));
+                    }
+                    if (debug()) {
+                        execErrorExitCb();
+                        V3Stats::statsFinalAll(v3Global.rootp());
+                        V3Stats::statsReport();
+                    }
+                    // Abort in exclusive access to make sure other threads
+                    // don't change error code
+                    vlAbortOrExit();
                 }
 #endif
             }
@@ -264,13 +263,8 @@ void V3Error::init() {
 
 string V3Error::lineStr(const char* filename, int lineno) VL_PURE {
     std::ostringstream out;
-    const char* const fnslashp = std::strrchr(filename, '/');
-    if (fnslashp) filename = fnslashp + 1;
-    out << filename << ":" << std::dec << lineno << ":";
-    const char* const spaces = "                    ";
-    size_t numsp = out.str().length();
-    if (numsp > 20) numsp = 20;
-    out << (spaces + numsp);
+    out << V3Os::filenameNonDir(filename) << ":" << std::dec << lineno << ":";
+    out << std::string(std::max<int>(0, 20 - static_cast<int>(out.str().length())), ' ');
     return out.str();
 }
 
@@ -292,4 +286,41 @@ void V3Error::abortIfWarnings() {
 void V3Error::vlAbort() {
     VL_GCOV_DUMP();
     std::abort();
+}
+void V3Error::v3errorAcquireLock(bool mtDisabledCodeUnit) VL_ACQUIRE(s().m_mutex) {
+#if !defined(V3ERROR_NO_GLOBAL_)
+    if (!mtDisabledCodeUnit) {
+        V3Error::s().m_mutex.lockCheckStopRequest(
+            []() -> void { V3ThreadPool::s().waitIfStopRequested(); });
+    } else {
+        V3Error::s().m_mutex.lock();
+    }
+#else
+    V3Error::s().m_mutex.lock();
+#endif
+}
+std::ostringstream& V3Error::v3errorPrep(V3ErrorCode code, bool mtDisabledCodeUnit)
+    VL_ACQUIRE(s().m_mutex) {
+    v3errorAcquireLock(mtDisabledCodeUnit);
+    s().v3errorPrep(code);
+    return v3errorStr();
+}
+std::ostringstream& V3Error::v3errorPrepFileLine(V3ErrorCode code, const char* file, int line,
+                                                 bool mtDisabledCodeUnit) VL_ACQUIRE(s().m_mutex) {
+    v3errorPrep(code, mtDisabledCodeUnit) << file << ":" << std::dec << line << ": ";
+    return v3errorStr();
+}
+std::ostringstream& V3Error::v3errorStr() VL_REQUIRES(s().m_mutex) { return s().v3errorStr(); }
+void V3Error::v3errorEnd(std::ostringstream& sstr, const string& extra) VL_RELEASE(s().m_mutex) {
+    s().v3errorEnd(sstr, extra);
+    V3Error::s().m_mutex.unlock();
+}
+
+void v3errorEnd(std::ostringstream& sstr) VL_RELEASE(V3Error::s().m_mutex) {
+    V3Error::v3errorEnd(sstr);
+}
+void v3errorEndFatal(std::ostringstream& sstr) VL_RELEASE(V3Error::s().m_mutex) {
+    V3Error::v3errorEnd(sstr);
+    assert(0);  // LCOV_EXCL_LINE
+    VL_UNREACHABLE;
 }

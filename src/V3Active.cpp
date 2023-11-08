@@ -26,14 +26,11 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Active.h"
 
-#include "V3Ast.h"
 #include "V3Const.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 
 #include <unordered_map>
@@ -47,6 +44,7 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 // Extend V3GraphVertex class for use in latch detection graph
 
 class LatchDetectGraphVertex final : public V3GraphVertex {
+    VL_RTTI_IMPL(LatchDetectGraphVertex, V3GraphVertex)
 public:
     enum VertexType : uint8_t { VT_BLOCK, VT_BRANCH, VT_OUTPUT };
 
@@ -127,8 +125,6 @@ public:
     // METHODS
     void begin() {
         // Start a new if/else tracking graph
-        // See NODE STATE comment in ActiveLatchCheckVisitor
-        AstNode::user1ClearTree();
         m_curVertexp = new LatchDetectGraphVertex{this, "ROOT"};
     }
     // Clear out userp field of referenced outputs on destruction
@@ -320,7 +316,8 @@ private:
     // VISITORS
     void visit(AstVarRef* nodep) override {
         const AstVar* const varp = nodep->varp();
-        if (nodep->access().isWriteOrRW() && varp->isSignal() && !varp->isUsedLoopIdx()) {
+        if (nodep->access().isWriteOrRW() && varp->isSignal() && !varp->isUsedLoopIdx()
+            && !varp->isFuncLocalSticky()) {
             m_graph.addAssignment(nodep);
         }
     }
@@ -333,6 +330,8 @@ private:
             m_graph.addPathVertex(branchp, "ELSE");
             iterateAndNextConstNull(nodep->elsesp());
             m_graph.currentp(parentp);
+        } else {
+            iterateChildrenConst(nodep);
         }
     }
     //--------------------

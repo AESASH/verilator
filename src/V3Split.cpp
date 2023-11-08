@@ -77,18 +77,13 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Split.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 #include "V3Stats.h"
 
-#include <algorithm>
-#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -99,6 +94,7 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 // Support classes
 
 class SplitNodeVertex VL_NOT_FINAL : public V3GraphVertex {
+    VL_RTTI_IMPL(SplitNodeVertex, V3GraphVertex)
     AstNode* const m_nodep;
 
 protected:
@@ -109,9 +105,7 @@ protected:
     // ACCESSORS
     // Do not make accessor for nodep(),  It may change due to
     // reordering a lower block, but we don't repair it
-    string name() const override VL_MT_STABLE {
-        return cvtToHex(m_nodep) + ' ' + m_nodep->prettyTypeName();
-    }
+    string name() const override { return cvtToHex(m_nodep) + ' ' + m_nodep->prettyTypeName(); }
     FileLine* fileline() const override { return nodep()->fileline(); }
 
 public:
@@ -119,6 +113,7 @@ public:
 };
 
 class SplitPliVertex final : public SplitNodeVertex {
+    VL_RTTI_IMPL(SplitPliVertex, SplitNodeVertex)
 public:
     explicit SplitPliVertex(V3Graph* graphp, AstNode* nodep)
         : SplitNodeVertex{graphp, nodep} {}
@@ -128,6 +123,7 @@ public:
 };
 
 class SplitLogicVertex final : public SplitNodeVertex {
+    VL_RTTI_IMPL(SplitLogicVertex, SplitNodeVertex)
 public:
     SplitLogicVertex(V3Graph* graphp, AstNode* nodep)
         : SplitNodeVertex{graphp, nodep} {}
@@ -136,6 +132,7 @@ public:
 };
 
 class SplitVarStdVertex final : public SplitNodeVertex {
+    VL_RTTI_IMPL(SplitVarStdVertex, SplitNodeVertex)
 public:
     SplitVarStdVertex(V3Graph* graphp, AstNode* nodep)
         : SplitNodeVertex{graphp, nodep} {}
@@ -144,11 +141,12 @@ public:
 };
 
 class SplitVarPostVertex final : public SplitNodeVertex {
+    VL_RTTI_IMPL(SplitVarPostVertex, SplitNodeVertex)
 public:
     SplitVarPostVertex(V3Graph* graphp, AstNode* nodep)
         : SplitNodeVertex{graphp, nodep} {}
     ~SplitVarPostVertex() override = default;
-    string name() const override VL_MT_STABLE { return string{"POST "} + SplitNodeVertex::name(); }
+    string name() const override { return string{"POST "} + SplitNodeVertex::name(); }
     string dotColor() const override { return "CadetBlue"; }
 };
 
@@ -156,6 +154,7 @@ public:
 // Edge types
 
 class SplitEdge VL_NOT_FINAL : public V3GraphEdge {
+    VL_RTTI_IMPL(SplitEdge, V3GraphEdge)
     uint32_t m_ignoreInStep = 0;  // Step number that if set to, causes this edge to be ignored
     static uint32_t s_stepNum;  // Global step number
 protected:
@@ -172,14 +171,12 @@ public:
     void setIgnoreThisStep() { m_ignoreInStep = s_stepNum; }
     virtual bool followScoreboard() const = 0;
     static bool followScoreboard(const V3GraphEdge* edgep) {
-        const SplitEdge* const oedgep = dynamic_cast<const SplitEdge*>(edgep);
-        if (!oedgep) v3fatalSrc("Following edge of non-SplitEdge type");
+        const SplitEdge* const oedgep = static_cast<const SplitEdge*>(edgep);
         if (oedgep->ignoreThisStep()) return false;
         return oedgep->followScoreboard();
     }
     static bool followCyclic(const V3GraphEdge* edgep) {
-        const SplitEdge* const oedgep = dynamic_cast<const SplitEdge*>(edgep);
-        if (!oedgep) v3fatalSrc("Following edge of non-SplitEdge type");
+        const SplitEdge* const oedgep = static_cast<const SplitEdge*>(edgep);
         return (!oedgep->ignoreThisStep());
     }
     string dotStyle() const override {
@@ -189,6 +186,7 @@ public:
 uint32_t SplitEdge::s_stepNum = 0;
 
 class SplitPostEdge final : public SplitEdge {
+    VL_RTTI_IMPL(SplitPostEdge, SplitEdge)
 public:
     SplitPostEdge(V3Graph* graphp, V3GraphVertex* fromp, V3GraphVertex* top)
         : SplitEdge{graphp, fromp, top, WEIGHT_NORMAL} {}
@@ -198,6 +196,7 @@ public:
 };
 
 class SplitLVEdge final : public SplitEdge {
+    VL_RTTI_IMPL(SplitLVEdge, SplitEdge)
 public:
     SplitLVEdge(V3Graph* graphp, V3GraphVertex* fromp, V3GraphVertex* top)
         : SplitEdge{graphp, fromp, top, WEIGHT_NORMAL} {}
@@ -207,6 +206,7 @@ public:
 };
 
 class SplitRVEdge final : public SplitEdge {
+    VL_RTTI_IMPL(SplitRVEdge, SplitEdge)
 public:
     SplitRVEdge(V3Graph* graphp, V3GraphVertex* fromp, V3GraphVertex* top)
         : SplitEdge{graphp, fromp, top, WEIGHT_NORMAL} {}
@@ -215,7 +215,8 @@ public:
     string dotColor() const override { return "green"; }
 };
 
-struct SplitScorebdEdge : public SplitEdge {
+class SplitScorebdEdge final : public SplitEdge {
+    VL_RTTI_IMPL(SplitScorebdEdge, SplitEdge)
 public:
     SplitScorebdEdge(V3Graph* graphp, V3GraphVertex* fromp, V3GraphVertex* top)
         : SplitEdge{graphp, fromp, top, WEIGHT_NORMAL} {}
@@ -224,7 +225,8 @@ public:
     string dotColor() const override { return "blue"; }
 };
 
-struct SplitStrictEdge : public SplitEdge {
+class SplitStrictEdge final : public SplitEdge {
+    VL_RTTI_IMPL(SplitStrictEdge, SplitEdge)
     // A strict order, based on the original statement order in the graph
     // The only non-cutable edge type
 public:
@@ -318,14 +320,14 @@ protected:
     void pruneDepsOnInputs() {
         for (V3GraphVertex* vertexp = m_graph.verticesBeginp(); vertexp;
              vertexp = vertexp->verticesNextp()) {
-            if (!vertexp->outBeginp() && dynamic_cast<SplitVarStdVertex*>(vertexp)) {
+            if (!vertexp->outBeginp() && vertexp->is<SplitVarStdVertex>()) {
                 if (debug() >= 9) {
                     const SplitVarStdVertex* const stdp = static_cast<SplitVarStdVertex*>(vertexp);
                     UINFO(0, "Will prune deps on var " << stdp->nodep() << endl);
                     stdp->nodep()->dumpTree("-  ");
                 }
                 for (V3GraphEdge* edgep = vertexp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-                    SplitEdge* const oedgep = dynamic_cast<SplitEdge*>(edgep);
+                    SplitEdge* const oedgep = static_cast<SplitEdge*>(edgep);
                     oedgep->setIgnoreThisStep();
                 }
             }
@@ -454,7 +456,7 @@ protected:
     void cleanupBlockGraph(AstNode* nodep) {
         // Transform the graph into what we need
         UINFO(5, "ReorderBlock " << nodep << endl);
-        m_graph.removeRedundantEdges(&V3GraphEdge::followAlwaysTrue);
+        m_graph.removeRedundantEdgesMax(&V3GraphEdge::followAlwaysTrue);
 
         if (dumpGraphLevel() >= 9) m_graph.dumpDotFilePrefixed("reorderg_nodup", false);
 
@@ -476,17 +478,16 @@ protected:
         // vertexes not involved with this step as unimportant
         for (V3GraphVertex* vertexp = m_graph.verticesBeginp(); vertexp;
              vertexp = vertexp->verticesNextp()) {
-            if (const SplitLogicVertex* const vvertexp
-                = dynamic_cast<SplitLogicVertex*>(vertexp)) {
-                if (!vvertexp->user()) {
+            if (!vertexp->user()) {
+                if (const SplitLogicVertex* const vvertexp = vertexp->cast<SplitLogicVertex>()) {
                     for (V3GraphEdge* edgep = vertexp->inBeginp(); edgep;
                          edgep = edgep->inNextp()) {
-                        SplitEdge* const oedgep = dynamic_cast<SplitEdge*>(edgep);
+                        SplitEdge* const oedgep = static_cast<SplitEdge*>(edgep);
                         oedgep->setIgnoreThisStep();
                     }
                     for (V3GraphEdge* edgep = vertexp->outBeginp(); edgep;
                          edgep = edgep->outNextp()) {
-                        SplitEdge* const oedgep = dynamic_cast<SplitEdge*>(edgep);
+                        SplitEdge* const oedgep = static_cast<SplitEdge*>(edgep);
                         oedgep->setIgnoreThisStep();
                     }
                 }
@@ -761,6 +762,8 @@ protected:
             // Clone this if into its set of split blocks
             AstSplitPlaceholder* const if_placeholderp = makePlaceholderp();
             AstSplitPlaceholder* const else_placeholderp = makePlaceholderp();
+            // We check for condition isPure earlier, but may still clone a
+            // non-pure to separate from other pure statements.
             AstIf* const clonep = new AstIf{nodep->fileline(), nodep->condp()->cloneTree(true),
                                             if_placeholderp, else_placeholderp};
             const AstIf* const origp = VN_CAST(nodep, If);
@@ -890,7 +893,7 @@ protected:
     void colorAlwaysGraph() {
         // Color the graph to indicate subsets, each of which
         // we can split into its own always block.
-        m_graph.removeRedundantEdges(&V3GraphEdge::followAlwaysTrue);
+        m_graph.removeRedundantEdgesMax(&V3GraphEdge::followAlwaysTrue);
 
         // Some vars are primary inputs to the always block; prune
         // edges on those vars. Reasoning: if two statements both depend
@@ -905,7 +908,7 @@ protected:
         // inputs) prune all edges that depend on the 'if'.
         for (V3GraphVertex* vertexp = m_graph.verticesBeginp(); vertexp;
              vertexp = vertexp->verticesNextp()) {
-            const SplitLogicVertex* const logicp = dynamic_cast<SplitLogicVertex*>(vertexp);
+            const SplitLogicVertex* const logicp = vertexp->cast<const SplitLogicVertex>();
             if (!logicp) continue;
 
             const AstNodeIf* const ifNodep = VN_CAST(logicp->nodep(), NodeIf);
@@ -913,7 +916,7 @@ protected:
 
             bool pruneMe = true;
             for (V3GraphEdge* edgep = logicp->outBeginp(); edgep; edgep = edgep->outNextp()) {
-                const SplitEdge* const oedgep = dynamic_cast<SplitEdge*>(edgep);
+                const SplitEdge* const oedgep = static_cast<const SplitEdge*>(edgep);
                 if (!oedgep->ignoreThisStep()) {
                     // This if conditional depends on something we can't
                     // prune -- a variable generated in the current block.
@@ -923,7 +926,8 @@ protected:
                     // give a hint about why...
                     if (debug() >= 9) {
                         V3GraphVertex* vxp = oedgep->top();
-                        const SplitNodeVertex* const nvxp = dynamic_cast<SplitNodeVertex*>(vxp);
+                        const SplitNodeVertex* const nvxp
+                            = static_cast<const SplitNodeVertex*>(vxp);
                         UINFO(0, "Cannot prune if-node due to edge "
                                      << oedgep << " pointing to node " << nvxp->nodep() << endl);
                         nvxp->nodep()->dumpTree("-  ");
@@ -937,7 +941,7 @@ protected:
 
             // This if can be split; prune dependencies on it.
             for (V3GraphEdge* edgep = logicp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-                SplitEdge* const oedgep = dynamic_cast<SplitEdge*>(edgep);
+                SplitEdge* const oedgep = static_cast<SplitEdge*>(edgep);
                 oedgep->setIgnoreThisStep();
             }
         }

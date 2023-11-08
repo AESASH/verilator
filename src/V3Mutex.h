@@ -109,6 +109,10 @@ public:
     bool try_lock() VL_TRY_ACQUIRE(true) VL_MT_SAFE {
         return V3MutexConfig::s().enable() ? m_mutex.try_lock() : true;
     }
+    /// Assume that the mutex is already held. Purely for Clang thread safety analyzer.
+    void assumeLocked() VL_ASSERT_CAPABILITY(this) VL_MT_SAFE {}
+    /// Pretend that the mutex is being unlocked. Purely for Clang thread safety analyzer.
+    void pretendUnlock() VL_RELEASE() VL_MT_SAFE {}
     /// Acquire/lock mutex and check for stop request
     /// It tries to lock the mutex and if it fails, it check if stop request was send.
     /// It returns after locking mutex.
@@ -135,12 +139,17 @@ private:
     T& m_mutexr;
 
 public:
-    /// Construct and hold given mutex lock until destruction or unlock()
+    /// Lock given mutex and hold it for the object lifetime.
     explicit V3LockGuardImp(T& mutexr) VL_ACQUIRE(mutexr) VL_MT_SAFE
         : m_mutexr(mutexr) {  // Need () or GCC 4.8 false warning
         mutexr.lock();
     }
-    /// Destruct and unlock the mutex
+    /// Take already locked mutex, and and hold the lock for the object lifetime.
+    explicit V3LockGuardImp(T& mutexr, std::adopt_lock_t) VL_REQUIRES(mutexr) VL_MT_SAFE
+        : m_mutexr(mutexr) {  // Need () or GCC 4.8 false warning
+    }
+
+    /// Unlock the mutex
     ~V3LockGuardImp() VL_RELEASE() { m_mutexr.unlock(); }
 };
 

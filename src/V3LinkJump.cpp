@@ -29,16 +29,12 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3LinkJump.h"
 
-#include "V3Ast.h"
 #include "V3AstUserAllocator.h"
-#include "V3Global.h"
 
-#include <algorithm>
 #include <vector>
 
 VL_DEFINE_DEBUG_FUNCTIONS;
@@ -196,6 +192,7 @@ private:
         // Spec says value is integral, if negative is ignored
         AstVar* const varp
             = new AstVar{nodep->fileline(), VVarType::BLOCKTEMP, name, nodep->findSigned32DType()};
+        varp->lifetime(VLifetime::AUTOMATIC);
         varp->usedLoopIdx(true);
         m_modp->addStmtsp(varp);
         AstNode* initsp = new AstAssign{
@@ -327,7 +324,7 @@ private:
             AstJumpLabel* const labelp = findAddLabel(beginp, false);
             nodep->addNextHere(new AstJumpGo{nodep->fileline(), labelp});
         } else {
-            nodep->v3warn(E_UNSUPPORTED, "Unsupported: disable fork");
+            nodep->v3warn(E_UNSUPPORTED, "Unsupported: disabling fork by name");
         }
         nodep->unlinkFrBack();
         VL_DO_DANGLING(pushDeletep(nodep), nodep);

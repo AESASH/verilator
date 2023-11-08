@@ -26,50 +26,11 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Begin.h"
 
-#include "V3Ast.h"
-#include "V3Global.h"
-
-#include <algorithm>
-
 VL_DEFINE_DEBUG_FUNCTIONS;
-
-//######################################################################
-
-class RenameStaticVisitor final : public VNVisitor {
-private:
-    // STATE
-    const std::set<AstVar*>& m_staticFuncVarsr;  // Static variables from m_ftaskp
-    AstNodeFTask* const m_ftaskp;  // Current function/task
-
-    // VISITORS
-    void visit(AstVarRef* nodep) override {
-        const auto it = m_staticFuncVarsr.find(nodep->varp());
-        if (it != m_staticFuncVarsr.end()) nodep->name((*it)->name());
-        iterateChildren(nodep);
-    }
-
-    void visit(AstInitialStatic* nodep) override {
-        iterateChildren(nodep);
-        nodep->unlinkFrBack();
-        m_ftaskp->addHereThisAsNext(nodep);
-    }
-
-    void visit(AstNode* nodep) override { iterateChildren(nodep); }
-
-public:
-    // CONSTRUCTORS
-    RenameStaticVisitor(std::set<AstVar*>& staticFuncVars, AstNodeFTask* ftaskp, AstNode* nodep)
-        : m_staticFuncVarsr(staticFuncVars)
-        , m_ftaskp(ftaskp) {
-        iterateChildren(nodep);
-    }
-    ~RenameStaticVisitor() override = default;
-};
 
 //######################################################################
 
@@ -105,7 +66,6 @@ private:
     string m_unnamedScope;  // Name of begin blocks, including unnamed blocks
     int m_ifDepth = 0;  // Current if depth
     bool m_keepBegins = false;  // True if begins should not be inlined
-    std::set<AstVar*> m_staticFuncVars;  // Static variables from m_ftaskp
 
     // METHODS
 
@@ -212,7 +172,10 @@ private:
             m_ftaskp = nodep;
             m_liftedp = nullptr;
             iterateChildren(nodep);
-            RenameStaticVisitor{m_staticFuncVars, m_ftaskp, nodep};
+            nodep->foreach([&](AstInitialStatic* const initp) {
+                initp->unlinkFrBack();
+                m_ftaskp->addHereThisAsNext(initp);
+            });
             if (m_liftedp) {
                 // Place lifted nodes at beginning of stmtsp, so Var nodes appear before referenced
                 if (AstNode* const stmtsp = nodep->stmtsp()) {
@@ -222,7 +185,6 @@ private:
                 nodep->addStmtsp(m_liftedp);
                 m_liftedp = nullptr;
             }
-            m_staticFuncVars.clear();
             m_ftaskp = nullptr;
         }
     }
@@ -266,7 +228,6 @@ private:
             nodep->name(newName);
             nodep->unlinkFrBack();
             m_ftaskp->addHereThisAsNext(nodep);
-            m_staticFuncVars.insert(nodep);
             nodep->funcLocal(false);
         } else if (m_unnamedScope != "") {
             // Rename it
@@ -377,7 +338,6 @@ private:
     void visit(AstVarRef* nodep) override {
         if (nodep->varp()->user1()) {  // It was converted
             UINFO(9, "    relinVarRef " << nodep << endl);
-            nodep->name(nodep->varp()->name());
         }
         iterateChildren(nodep);
     }

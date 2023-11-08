@@ -61,7 +61,7 @@
         <creset loc="d,51,17,51,18">
           <varref loc="d,51,17,51,18" name="t.unnamedblk1.e" dtype_id="2"/>
         </creset>
-        <var loc="d,48,123,48,127" name="__Vtemp_h########__0" dtype_id="10" vartype="string" origName="__Vtemp_h########__0"/>
+        <var loc="d,48,123,48,127" name="__Vtemp_1" dtype_id="10" vartype="string" origName="__Vtemp_1"/>
         <assign loc="d,31,9,31,10" dtype_id="11">
           <const loc="d,31,11,31,14" name="4&apos;h3" dtype_id="11"/>
           <varref loc="d,31,7,31,8" name="t.e" dtype_id="11"/>
@@ -510,11 +510,11 @@
                   </ccast>
                 </and>
               </arraysel>
-              <varref loc="d,48,123,48,127" name="__Vtemp_h########__0" dtype_id="10"/>
+              <varref loc="d,48,123,48,127" name="__Vtemp_1" dtype_id="10"/>
             </assign>
             <display loc="d,48,42,48,48" displaytype="$write">
               <sformatf loc="d,48,42,48,48" name="%%Error: t/t_enum_type_methods.v:48:  got=&apos;%@&apos; exp=&apos;E03&apos;&#10;" dtype_id="10">
-                <varref loc="d,48,123,48,127" name="__Vtemp_h########__0" dtype_id="10"/>
+                <varref loc="d,48,123,48,127" name="__Vtemp_1" dtype_id="10"/>
               </sformatf>
             </display>
             <stop loc="d,48,140,48,145"/>
@@ -543,15 +543,17 @@
             <assign loc="d,52,14,52,15" dtype_id="10">
               <concatn loc="d,52,20,52,21" dtype_id="10">
                 <varref loc="d,52,17,52,20" name="t.all" dtype_id="10"/>
-                <arraysel loc="d,52,24,52,28" dtype_id="10">
-                  <varref loc="d,16,12,16,16" name="__Venumtab_enum_name2" dtype_id="16"/>
-                  <and loc="d,52,24,52,28" dtype_id="13">
-                    <const loc="d,52,24,52,28" name="32&apos;h7" dtype_id="14"/>
-                    <ccast loc="d,52,22,52,23" dtype_id="13">
-                      <varref loc="d,52,22,52,23" name="t.unnamedblk1.e" dtype_id="13"/>
-                    </ccast>
-                  </and>
-                </arraysel>
+                <cvtpackstring loc="d,52,24,52,28" dtype_id="10">
+                  <arraysel loc="d,52,24,52,28" dtype_id="10">
+                    <varref loc="d,16,12,16,16" name="__Venumtab_enum_name2" dtype_id="16"/>
+                    <and loc="d,52,24,52,28" dtype_id="13">
+                      <const loc="d,52,24,52,28" name="32&apos;h7" dtype_id="14"/>
+                      <ccast loc="d,52,22,52,23" dtype_id="13">
+                        <varref loc="d,52,22,52,23" name="t.unnamedblk1.e" dtype_id="13"/>
+                      </ccast>
+                    </and>
+                  </arraysel>
+                </cvtpackstring>
               </concatn>
               <varref loc="d,52,10,52,13" name="t.all" dtype_id="10"/>
             </assign>
@@ -578,7 +580,7 @@
         <assign loc="d,55,11,55,12" dtype_id="10">
           <concatn loc="d,55,17,55,18" dtype_id="10">
             <varref loc="d,55,14,55,17" name="t.all" dtype_id="10"/>
-            <const loc="d,16,12,16,16" name="&quot;E04&quot;" dtype_id="10"/>
+            <const loc="d,55,21,55,25" name="&quot;E04&quot;" dtype_id="10"/>
           </concatn>
           <varref loc="d,55,7,55,10" name="t.all" dtype_id="10"/>
         </assign>
@@ -623,8 +625,8 @@
         <textblock loc="d,10,8,10,9">
           <text loc="d,10,8,10,9"/>
           <text loc="d,10,8,10,9"/>
-          <stmtexpr loc="d,10,8,10,9">
-            <ccall loc="d,10,8,10,9" dtype_id="7" func="_dump_triggers__act"/>
+          <stmtexpr loc="a,0,0,0,0">
+            <ccall loc="a,0,0,0,0" dtype_id="7" func="_dump_triggers__act"/>
           </stmtexpr>
           <text loc="d,10,8,10,9"/>
           <text loc="d,10,8,10,9"/>
@@ -698,9 +700,9 @@
         <creset loc="d,23,9,23,10">
           <varref loc="d,23,9,23,10" name="__Vdly__t.e" dtype_id="2"/>
         </creset>
-        <var loc="d,67,126,67,130" name="__Vtemp_h########__0" dtype_id="10" vartype="string" origName="__Vtemp_h########__0"/>
-        <var loc="d,77,126,77,130" name="__Vtemp_h########__1" dtype_id="10" vartype="string" origName="__Vtemp_h########__1"/>
-        <var loc="d,87,126,87,130" name="__Vtemp_h########__2" dtype_id="10" vartype="string" origName="__Vtemp_h########__2"/>
+        <var loc="d,67,126,67,130" name="__Vtemp_1" dtype_id="10" vartype="string" origName="__Vtemp_1"/>
+        <var loc="d,77,126,77,130" name="__Vtemp_2" dtype_id="10" vartype="string" origName="__Vtemp_2"/>
+        <var loc="d,87,126,87,130" name="__Vtemp_3" dtype_id="10" vartype="string" origName="__Vtemp_3"/>
         <assignpre loc="d,64,10,64,11" dtype_id="11">
           <varref loc="d,64,10,64,11" name="t.e" dtype_id="11"/>
           <varref loc="d,64,10,64,11" name="__Vdly__t.e" dtype_id="11"/>
@@ -760,11 +762,11 @@
                           </ccast>
                         </and>
                       </arraysel>
-                      <varref loc="d,67,126,67,130" name="__Vtemp_h########__0" dtype_id="10"/>
+                      <varref loc="d,67,126,67,130" name="__Vtemp_1" dtype_id="10"/>
                     </assign>
                     <display loc="d,67,45,67,51" displaytype="$write">
                       <sformatf loc="d,67,45,67,51" name="%%Error: t/t_enum_type_methods.v:67:  got=&apos;%@&apos; exp=&apos;E01&apos;&#10;" dtype_id="10">
-                        <varref loc="d,67,126,67,130" name="__Vtemp_h########__0" dtype_id="10"/>
+                        <varref loc="d,67,126,67,130" name="__Vtemp_1" dtype_id="10"/>
                       </sformatf>
                     </display>
                     <stop loc="d,67,143,67,148"/>
@@ -1010,11 +1012,11 @@
                               </ccast>
                             </and>
                           </arraysel>
-                          <varref loc="d,77,126,77,130" name="__Vtemp_h########__1" dtype_id="10"/>
+                          <varref loc="d,77,126,77,130" name="__Vtemp_2" dtype_id="10"/>
                         </assign>
                         <display loc="d,77,45,77,51" displaytype="$write">
                           <sformatf loc="d,77,45,77,51" name="%%Error: t/t_enum_type_methods.v:77:  got=&apos;%@&apos; exp=&apos;E03&apos;&#10;" dtype_id="10">
-                            <varref loc="d,77,126,77,130" name="__Vtemp_h########__1" dtype_id="10"/>
+                            <varref loc="d,77,126,77,130" name="__Vtemp_2" dtype_id="10"/>
                           </sformatf>
                         </display>
                         <stop loc="d,77,143,77,148"/>
@@ -1260,11 +1262,11 @@
                                   </ccast>
                                 </and>
                               </arraysel>
-                              <varref loc="d,87,126,87,130" name="__Vtemp_h########__2" dtype_id="10"/>
+                              <varref loc="d,87,126,87,130" name="__Vtemp_3" dtype_id="10"/>
                             </assign>
                             <display loc="d,87,45,87,51" displaytype="$write">
                               <sformatf loc="d,87,45,87,51" name="%%Error: t/t_enum_type_methods.v:87:  got=&apos;%@&apos; exp=&apos;E04&apos;&#10;" dtype_id="10">
-                                <varref loc="d,87,126,87,130" name="__Vtemp_h########__2" dtype_id="10"/>
+                                <varref loc="d,87,126,87,130" name="__Vtemp_3" dtype_id="10"/>
                               </sformatf>
                             </display>
                             <stop loc="d,87,143,87,148"/>
@@ -1525,8 +1527,69 @@
           </begin>
         </if>
       </cfunc>
-      <cfunc loc="a,0,0,0,0" name="_eval">
+      <cfunc loc="a,0,0,0,0" name="_eval_phase__act">
         <var loc="d,10,8,10,9" name="__VpreTriggered" dtype_id="6" vartype="VlTriggerVec" origName="__VpreTriggered"/>
+        <var loc="d,10,8,10,9" name="__VactExecute" dtype_id="3" vartype="bit" origName="__VactExecute"/>
+        <stmtexpr loc="a,0,0,0,0">
+          <ccall loc="a,0,0,0,0" dtype_id="7" func="_eval_triggers__act"/>
+        </stmtexpr>
+        <assign loc="a,0,0,0,0" dtype_id="9">
+          <cmethodhard loc="a,0,0,0,0" name="any" dtype_id="9">
+            <varref loc="a,0,0,0,0" name="__VactTriggered" dtype_id="9"/>
+          </cmethodhard>
+          <varref loc="a,0,0,0,0" name="__VactExecute" dtype_id="9"/>
+        </assign>
+        <if loc="a,0,0,0,0">
+          <varref loc="a,0,0,0,0" name="__VactExecute" dtype_id="9"/>
+          <begin>
+            <stmtexpr loc="a,0,0,0,0">
+              <cmethodhard loc="a,0,0,0,0" name="andNot" dtype_id="7">
+                <varref loc="a,0,0,0,0" name="__VpreTriggered" dtype_id="9"/>
+                <varref loc="a,0,0,0,0" name="__VactTriggered" dtype_id="9"/>
+                <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
+              </cmethodhard>
+            </stmtexpr>
+            <stmtexpr loc="a,0,0,0,0">
+              <cmethodhard loc="a,0,0,0,0" name="thisOr" dtype_id="7">
+                <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
+                <varref loc="a,0,0,0,0" name="__VactTriggered" dtype_id="9"/>
+              </cmethodhard>
+            </stmtexpr>
+            <stmtexpr loc="a,0,0,0,0">
+              <ccall loc="a,0,0,0,0" dtype_id="7" func="_eval_act"/>
+            </stmtexpr>
+          </begin>
+        </if>
+        <creturn loc="a,0,0,0,0">
+          <varref loc="a,0,0,0,0" name="__VactExecute" dtype_id="9"/>
+        </creturn>
+      </cfunc>
+      <cfunc loc="a,0,0,0,0" name="_eval_phase__nba">
+        <var loc="d,10,8,10,9" name="__VnbaExecute" dtype_id="3" vartype="bit" origName="__VnbaExecute"/>
+        <assign loc="a,0,0,0,0" dtype_id="9">
+          <cmethodhard loc="a,0,0,0,0" name="any" dtype_id="9">
+            <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
+          </cmethodhard>
+          <varref loc="a,0,0,0,0" name="__VnbaExecute" dtype_id="9"/>
+        </assign>
+        <if loc="a,0,0,0,0">
+          <varref loc="a,0,0,0,0" name="__VnbaExecute" dtype_id="9"/>
+          <begin>
+            <stmtexpr loc="a,0,0,0,0">
+              <ccall loc="a,0,0,0,0" dtype_id="7" func="_eval_nba"/>
+            </stmtexpr>
+            <stmtexpr loc="a,0,0,0,0">
+              <cmethodhard loc="a,0,0,0,0" name="clear" dtype_id="7">
+                <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
+              </cmethodhard>
+            </stmtexpr>
+          </begin>
+        </if>
+        <creturn loc="a,0,0,0,0">
+          <varref loc="a,0,0,0,0" name="__VnbaExecute" dtype_id="9"/>
+        </creturn>
+      </cfunc>
+      <cfunc loc="a,0,0,0,0" name="_eval">
         <var loc="d,10,8,10,9" name="__VnbaIterCount" dtype_id="5" vartype="bit" origName="__VnbaIterCount"/>
         <var loc="d,10,8,10,9" name="__VnbaContinue" dtype_id="3" vartype="bit" origName="__VnbaContinue"/>
         <assign loc="d,10,8,10,9" dtype_id="5">
@@ -1537,22 +1600,43 @@
           <const loc="d,10,8,10,9" name="1&apos;h1" dtype_id="9"/>
           <varref loc="d,10,8,10,9" name="__VnbaContinue" dtype_id="9"/>
         </assign>
-        <while loc="d,10,8,10,9">
+        <while loc="a,0,0,0,0">
           <begin>
           </begin>
           <begin>
-            <varref loc="d,10,8,10,9" name="__VnbaContinue" dtype_id="9"/>
+            <varref loc="a,0,0,0,0" name="__VnbaContinue" dtype_id="9"/>
           </begin>
           <begin>
+            <if loc="a,0,0,0,0">
+              <lt loc="a,0,0,0,0" dtype_id="9">
+                <const loc="a,0,0,0,0" name="32&apos;h64" dtype_id="14"/>
+                <varref loc="a,0,0,0,0" name="__VnbaIterCount" dtype_id="5"/>
+              </lt>
+              <begin>
+                <textblock loc="a,0,0,0,0">
+                  <text loc="a,0,0,0,0"/>
+                  <stmtexpr loc="a,0,0,0,0">
+                    <ccall loc="a,0,0,0,0" dtype_id="7" func="_dump_triggers__nba"/>
+                  </stmtexpr>
+                  <text loc="a,0,0,0,0"/>
+                  <text loc="a,0,0,0,0"/>
+                  <text loc="a,0,0,0,0"/>
+                </textblock>
+              </begin>
+            </if>
+            <assign loc="d,10,8,10,9" dtype_id="5">
+              <add loc="d,10,8,10,9" dtype_id="5">
+                <ccast loc="d,10,8,10,9" dtype_id="14">
+                  <const loc="d,10,8,10,9" name="32&apos;h1" dtype_id="14"/>
+                </ccast>
+                <varref loc="d,10,8,10,9" name="__VnbaIterCount" dtype_id="5"/>
+              </add>
+              <varref loc="d,10,8,10,9" name="__VnbaIterCount" dtype_id="5"/>
+            </assign>
             <assign loc="d,10,8,10,9" dtype_id="9">
               <const loc="d,10,8,10,9" name="1&apos;h0" dtype_id="9"/>
               <varref loc="d,10,8,10,9" name="__VnbaContinue" dtype_id="9"/>
             </assign>
-            <stmtexpr loc="a,0,0,0,0">
-              <cmethodhard loc="a,0,0,0,0" name="clear" dtype_id="7">
-                <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
-              </cmethodhard>
-            </stmtexpr>
             <assign loc="d,10,8,10,9" dtype_id="5">
               <const loc="d,10,8,10,9" name="32&apos;h0" dtype_id="14"/>
               <varref loc="d,10,8,10,9" name="__VactIterCount" dtype_id="5"/>
@@ -1561,98 +1645,27 @@
               <const loc="d,10,8,10,9" name="1&apos;h1" dtype_id="9"/>
               <varref loc="d,10,8,10,9" name="__VactContinue" dtype_id="9"/>
             </assign>
-            <while loc="d,10,8,10,9">
+            <while loc="a,0,0,0,0">
               <begin>
               </begin>
               <begin>
-                <varref loc="d,10,8,10,9" name="__VactContinue" dtype_id="9"/>
+                <varref loc="a,0,0,0,0" name="__VactContinue" dtype_id="9"/>
               </begin>
               <begin>
-                <assign loc="d,10,8,10,9" dtype_id="9">
-                  <const loc="d,10,8,10,9" name="1&apos;h0" dtype_id="9"/>
-                  <varref loc="d,10,8,10,9" name="__VactContinue" dtype_id="9"/>
-                </assign>
-                <stmtexpr loc="a,0,0,0,0">
-                  <ccall loc="a,0,0,0,0" dtype_id="7" func="_eval_triggers__act"/>
-                </stmtexpr>
-                <if loc="d,10,8,10,9">
-                  <cmethodhard loc="d,10,8,10,9" name="any" dtype_id="9">
-                    <varref loc="d,10,8,10,9" name="__VactTriggered" dtype_id="9"/>
-                  </cmethodhard>
-                  <begin>
-                    <assign loc="d,10,8,10,9" dtype_id="9">
-                      <const loc="d,10,8,10,9" name="1&apos;h1" dtype_id="9"/>
-                      <varref loc="d,10,8,10,9" name="__VactContinue" dtype_id="9"/>
-                    </assign>
-                    <if loc="d,10,8,10,9">
-                      <lt loc="d,10,8,10,9" dtype_id="9">
-                        <const loc="d,10,8,10,9" name="32&apos;h64" dtype_id="14"/>
-                        <varref loc="d,10,8,10,9" name="__VactIterCount" dtype_id="5"/>
-                      </lt>
-                      <begin>
-                        <textblock loc="d,10,8,10,9">
-                          <text loc="d,10,8,10,9"/>
-                          <stmtexpr loc="d,10,8,10,9">
-                            <ccall loc="d,10,8,10,9" dtype_id="7" func="_dump_triggers__act"/>
-                          </stmtexpr>
-                          <text loc="d,10,8,10,9"/>
-                          <text loc="d,10,8,10,9"/>
-                          <text loc="d,10,8,10,9"/>
-                        </textblock>
-                      </begin>
-                    </if>
-                    <assign loc="d,10,8,10,9" dtype_id="5">
-                      <add loc="d,10,8,10,9" dtype_id="5">
-                        <ccast loc="d,10,8,10,9" dtype_id="14">
-                          <const loc="d,10,8,10,9" name="32&apos;h1" dtype_id="14"/>
-                        </ccast>
-                        <varref loc="d,10,8,10,9" name="__VactIterCount" dtype_id="5"/>
-                      </add>
-                      <varref loc="d,10,8,10,9" name="__VactIterCount" dtype_id="5"/>
-                    </assign>
-                    <stmtexpr loc="a,0,0,0,0">
-                      <cmethodhard loc="a,0,0,0,0" name="andNot" dtype_id="7">
-                        <varref loc="a,0,0,0,0" name="__VpreTriggered" dtype_id="9"/>
-                        <varref loc="a,0,0,0,0" name="__VactTriggered" dtype_id="9"/>
-                        <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
-                      </cmethodhard>
-                    </stmtexpr>
-                    <stmtexpr loc="a,0,0,0,0">
-                      <cmethodhard loc="a,0,0,0,0" name="thisOr" dtype_id="7">
-                        <varref loc="a,0,0,0,0" name="__VnbaTriggered" dtype_id="9"/>
-                        <varref loc="a,0,0,0,0" name="__VactTriggered" dtype_id="9"/>
-                      </cmethodhard>
-                    </stmtexpr>
-                    <stmtexpr loc="a,0,0,0,0">
-                      <ccall loc="a,0,0,0,0" dtype_id="7" func="_eval_act"/>
-                    </stmtexpr>
-                  </begin>
-                </if>
-              </begin>
-            </while>
-            <if loc="d,10,8,10,9">
-              <cmethodhard loc="d,10,8,10,9" name="any" dtype_id="9">
-                <varref loc="d,10,8,10,9" name="__VnbaTriggered" dtype_id="9"/>
-              </cmethodhard>
-              <begin>
-                <assign loc="d,10,8,10,9" dtype_id="9">
-                  <const loc="d,10,8,10,9" name="1&apos;h1" dtype_id="9"/>
-                  <varref loc="d,10,8,10,9" name="__VnbaContinue" dtype_id="9"/>
-                </assign>
-                <if loc="d,10,8,10,9">
-                  <lt loc="d,10,8,10,9" dtype_id="9">
-                    <const loc="d,10,8,10,9" name="32&apos;h64" dtype_id="14"/>
-                    <varref loc="d,10,8,10,9" name="__VnbaIterCount" dtype_id="5"/>
+                <if loc="a,0,0,0,0">
+                  <lt loc="a,0,0,0,0" dtype_id="9">
+                    <const loc="a,0,0,0,0" name="32&apos;h64" dtype_id="14"/>
+                    <varref loc="a,0,0,0,0" name="__VactIterCount" dtype_id="5"/>
                   </lt>
                   <begin>
-                    <textblock loc="d,10,8,10,9">
-                      <text loc="d,10,8,10,9"/>
-                      <stmtexpr loc="d,10,8,10,9">
-                        <ccall loc="d,10,8,10,9" dtype_id="7" func="_dump_triggers__nba"/>
+                    <textblock loc="a,0,0,0,0">
+                      <text loc="a,0,0,0,0"/>
+                      <stmtexpr loc="a,0,0,0,0">
+                        <ccall loc="a,0,0,0,0" dtype_id="7" func="_dump_triggers__act"/>
                       </stmtexpr>
-                      <text loc="d,10,8,10,9"/>
-                      <text loc="d,10,8,10,9"/>
-                      <text loc="d,10,8,10,9"/>
+                      <text loc="a,0,0,0,0"/>
+                      <text loc="a,0,0,0,0"/>
+                      <text loc="a,0,0,0,0"/>
                     </textblock>
                   </begin>
                 </if>
@@ -1661,13 +1674,32 @@
                     <ccast loc="d,10,8,10,9" dtype_id="14">
                       <const loc="d,10,8,10,9" name="32&apos;h1" dtype_id="14"/>
                     </ccast>
-                    <varref loc="d,10,8,10,9" name="__VnbaIterCount" dtype_id="5"/>
+                    <varref loc="d,10,8,10,9" name="__VactIterCount" dtype_id="5"/>
                   </add>
-                  <varref loc="d,10,8,10,9" name="__VnbaIterCount" dtype_id="5"/>
+                  <varref loc="d,10,8,10,9" name="__VactIterCount" dtype_id="5"/>
                 </assign>
-                <stmtexpr loc="a,0,0,0,0">
-                  <ccall loc="a,0,0,0,0" dtype_id="7" func="_eval_nba"/>
-                </stmtexpr>
+                <assign loc="d,10,8,10,9" dtype_id="9">
+                  <const loc="d,10,8,10,9" name="1&apos;h0" dtype_id="9"/>
+                  <varref loc="d,10,8,10,9" name="__VactContinue" dtype_id="9"/>
+                </assign>
+                <if loc="a,0,0,0,0">
+                  <ccall loc="a,0,0,0,0" dtype_id="9" func="_eval_phase__act"/>
+                  <begin>
+                    <assign loc="d,10,8,10,9" dtype_id="9">
+                      <const loc="d,10,8,10,9" name="1&apos;h1" dtype_id="9"/>
+                      <varref loc="d,10,8,10,9" name="__VactContinue" dtype_id="9"/>
+                    </assign>
+                  </begin>
+                </if>
+              </begin>
+            </while>
+            <if loc="a,0,0,0,0">
+              <ccall loc="a,0,0,0,0" dtype_id="9" func="_eval_phase__nba"/>
+              <begin>
+                <assign loc="d,10,8,10,9" dtype_id="9">
+                  <const loc="d,10,8,10,9" name="1&apos;h1" dtype_id="9"/>
+                  <varref loc="d,10,8,10,9" name="__VnbaContinue" dtype_id="9"/>
+                </assign>
               </begin>
             </if>
           </begin>
@@ -1810,8 +1842,8 @@
       <basicdtype loc="d,10,8,10,9" id="6" name="VlTriggerVec"/>
       <basicdtype loc="d,10,8,10,9" id="18" name="QData" left="63" right="0"/>
       <basicdtype loc="d,10,8,10,9" id="17" name="logic" left="63" right="0"/>
-      <basicdtype loc="d,10,8,10,9" id="5" name="bit" left="31" right="0"/>
       <basicdtype loc="d,10,8,10,9" id="3" name="bit"/>
+      <basicdtype loc="d,10,8,10,9" id="5" name="bit" left="31" right="0"/>
       <basicdtype loc="d,60,22,60,25" id="9" name="logic" left="31" right="0"/>
       <basicdtype loc="d,31,11,31,14" id="11" name="logic" left="31" right="0"/>
       <basicdtype loc="d,37,17,37,21" id="13" name="logic" left="31" right="0"/>

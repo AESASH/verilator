@@ -71,17 +71,14 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Order.h"
 
-#include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3Const.h"
 #include "V3EmitV.h"
 #include "V3File.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 #include "V3GraphStream.h"
 #include "V3List.h"
@@ -94,10 +91,8 @@
 #include "V3SplitVar.h"
 #include "V3Stats.h"
 
-#include <algorithm>
 #include <deque>
 #include <iomanip>
-#include <map>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -500,14 +495,9 @@ public:
     V3List<OrderMoveVertex*>& readyVertices() { return m_readyVertices; }
     static OrderMoveDomScope* findCreate(const AstSenTree* domainp, const AstScope* scopep) {
         const DomScopeKey key = std::make_pair(domainp, scopep);
-        const auto iter = s_dsMap.find(key);
-        if (iter != s_dsMap.end()) {
-            return iter->second;
-        } else {
-            OrderMoveDomScope* domScopep = new OrderMoveDomScope{domainp, scopep};
-            s_dsMap.emplace(key, domScopep);
-            return domScopep;
-        }
+        const auto pair = s_dsMap.emplace(key, nullptr);
+        if (pair.second) pair.first->second = new OrderMoveDomScope{domainp, scopep};
+        return pair.first->second;
     }
     string name() const {
         return string{"MDS:"} + " d=" + cvtToHex(domainp()) + " s=" + cvtToHex(scopep());
@@ -597,7 +587,7 @@ public:
 
         // For each logic vertex, make a T_MoveVertex, for each variable vertex, allocate storage
         for (V3GraphVertex* itp = m_graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
-            if (OrderLogicVertex* const lvtxp = dynamic_cast<OrderLogicVertex*>(itp)) {
+            if (OrderLogicVertex* const lvtxp = itp->cast<OrderLogicVertex>()) {
                 lvtxp->userp(m_vxMakerp->makeVertexp(lvtxp, nullptr, lvtxp->domainp()));
             } else {
                 // This is an OrderVarVertex
@@ -607,7 +597,7 @@ public:
         }
         // Build edges between logic vertices
         for (V3GraphVertex* itp = m_graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
-            if (OrderLogicVertex* const lvtxp = dynamic_cast<OrderLogicVertex*>(itp)) {
+            if (OrderLogicVertex* const lvtxp = itp->cast<OrderLogicVertex>()) {
                 iterateLogicVertex(lvtxp);
             }
         }
@@ -799,7 +789,7 @@ struct MTaskVxIdLessThan final {
 //######################################################################
 // OrderProcess class
 
-class OrderProcess final : VNDeleter {
+class OrderProcess final {
     // NODE STATE
     //  AstNode::user4  -> Used by V3Const::constifyExpensiveEdit
 
@@ -827,6 +817,7 @@ class OrderProcess final : VNDeleter {
     friend class OrderMoveDomScope;
     V3List<OrderMoveDomScope*> m_pomReadyDomScope;  // List of ready domain/scope pairs, by loopId
     std::map<std::pair<AstNodeModule*, std::string>, unsigned> m_funcNums;  // Function ordinals
+    VNDeleter m_deleter;  // Used to delay deletion of nodes
 
     // METHODS
 
@@ -860,7 +851,7 @@ class OrderProcess final : VNDeleter {
         string name = "_" + m_tag;
         name += domainp->isMulti() ? "_comb" : "_sequent";
         name = name + "__" + scopep->nameDotless();
-        const unsigned funcnum = m_funcNums.emplace(std::make_pair(modp, name), 0).first->second++;
+        const unsigned funcnum = m_funcNums[{modp, name}]++;
         name = name + "__" + cvtToStr(funcnum);
         if (v3Global.opt.profCFuncs()) {
             name += "__PROF__" + forWhatp->fileline()->profileFuncname();
@@ -898,10 +889,10 @@ class OrderProcess final : VNDeleter {
         , m_deleteDomainp{makeDeleteDomainSenTree(netlistp->fileline())}
         , m_tag{tag}
         , m_slow{slow} {
-        pushDeletep(m_deleteDomainp);
+        m_deleter.pushDeletep(m_deleteDomainp);
     }
 
-    ~OrderProcess() override = default;
+    ~OrderProcess() = default;
 
 public:
     // Order the logic
@@ -941,8 +932,8 @@ void OrderMoveDomScope::movedVertex(OrderProcess* opp, OrderMoveVertex* vertexp)
 
 void OrderProcess::processDomains() {
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        OrderEitherVertex* const vertexp = dynamic_cast<OrderEitherVertex*>(itp);
-        UASSERT(vertexp, "Null or vertex not derived from EitherVertex");
+        UASSERT(itp, "Vertex should not be null");
+        OrderEitherVertex* const vertexp = itp->as<OrderEitherVertex>();
         processDomainsIterate(vertexp);
     }
 }
@@ -958,7 +949,7 @@ void OrderProcess::processDomainsIterate(OrderEitherVertex* vertexp) {
 
     UINFO(5, "    pdi: " << vertexp << endl);
     AstSenTree* domainp = nullptr;
-    if (OrderLogicVertex* const lvtxp = dynamic_cast<OrderLogicVertex*>(vertexp)) {
+    if (OrderLogicVertex* const lvtxp = vertexp->cast<OrderLogicVertex>()) {
         domainp = lvtxp->hybridp();
     }
 
@@ -970,7 +961,7 @@ void OrderProcess::processDomainsIterate(OrderEitherVertex* vertexp) {
             AstSenTree* fromDomainp = fromVertexp->domainp();
             UASSERT(!fromDomainp->hasCombo(), "There should be no need for combinational domains");
 
-            if (OrderVarVertex* const varVtxp = dynamic_cast<OrderVarVertex*>(fromVertexp)) {
+            if (OrderVarVertex* const varVtxp = fromVertexp->cast<OrderVarVertex>()) {
                 AstVarScope* const vscp = varVtxp->vscp();
                 // Add in any external domains
                 externalDomainps.clear();
@@ -1023,13 +1014,13 @@ void OrderProcess::processEdgeReport() {
     for (const auto& pair : m_trigToSen) trigToSen.emplace(*pair.first, pair.second);
 
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        if (OrderVarVertex* const vvertexp = dynamic_cast<OrderVarVertex*>(itp)) {
+        if (OrderVarVertex* const vvertexp = itp->cast<OrderVarVertex>()) {
             string name(vvertexp->vscp()->prettyName());
-            if (dynamic_cast<OrderVarPreVertex*>(itp)) {
+            if (itp->is<OrderVarPreVertex>()) {
                 name += " {PRE}";
-            } else if (dynamic_cast<OrderVarPostVertex*>(itp)) {
+            } else if (itp->is<OrderVarPostVertex>()) {
                 name += " {POST}";
-            } else if (dynamic_cast<OrderVarPordVertex*>(itp)) {
+            } else if (itp->is<OrderVarPordVertex>()) {
                 name += " {PORD}";
             }
             std::ostringstream os;
@@ -1214,12 +1205,14 @@ AstActive* OrderProcess::processMoveOneLogic(const OrderLogicVertex* lvertexp,
     // Process procedures per statement (unless profCFuncs), so we can split CFuncs within
     // procedures. Everything else is handled in one go
     bool suspendable = false;
+    bool needProcess = false;
     bool slow = m_slow;
     if (AstNodeProcedure* const procp = VN_CAST(nodep, NodeProcedure)) {
         suspendable = procp->isSuspendable();
+        needProcess = procp->needProcess();
         if (suspendable) slow = slow && !VN_IS(procp, Always);
         nodep = procp->stmtsp();
-        pushDeletep(procp);
+        m_deleter.pushDeletep(procp);
     }
 
     // Put suspendable processes into individual functions on their own
@@ -1241,6 +1234,7 @@ AstActive* OrderProcess::processMoveOneLogic(const OrderLogicVertex* lvertexp,
             const string name = cfuncName(modp, domainp, scopep, nodep);
             newFuncpr
                 = new AstCFunc{nodep->fileline(), name, scopep, suspendable ? "VlCoroutine" : ""};
+            if (needProcess) newFuncpr->setNeedProcess();
             newFuncpr->isStatic(false);
             newFuncpr->isLoose(true);
             newFuncpr->slow(slow);
@@ -1265,7 +1259,7 @@ AstActive* OrderProcess::processMoveOneLogic(const OrderLogicVertex* lvertexp,
         if (nodep->backp()) nodep->unlinkFrBack();
 
         if (domainp == m_deleteDomainp) {
-            VL_DO_DANGLING(pushDeletep(nodep), nodep);
+            VL_DO_DANGLING(m_deleter.pushDeletep(nodep), nodep);
         } else {
             newFuncpr->addStmtsp(nodep);
             // Add in the number of nodes we're adding
@@ -1297,12 +1291,12 @@ void OrderProcess::processMTasks() {
     mtask_pmbg.build();
 
     // Needed? We do this for m_pomGraph in serial mode, so do it here too:
-    logicGraph.removeRedundantEdges(&V3GraphEdge::followAlwaysTrue);
+    logicGraph.removeRedundantEdgesMax(&V3GraphEdge::followAlwaysTrue);
 
     // Partition logicGraph into LogicMTask's. The partitioner will annotate
     // each vertex in logicGraph with a 'color' which is really an mtask ID
     // in this context.
-    V3Partition partitioner(&m_graph, &logicGraph);
+    V3Partition partitioner{&m_graph, &logicGraph};
     V3Graph mtasks;
     partitioner.go(&mtasks);
 
@@ -1313,7 +1307,7 @@ void OrderProcess::processMTasks() {
     // This is the order we'll execute logic nodes within the MTask.
     //
     // MTasks may span scopes and domains, so sort by both here:
-    GraphStream<OrderVerticesByDomainThenScope> emit_logic(&logicGraph);
+    GraphStream<OrderVerticesByDomainThenScope> emit_logic{&logicGraph};
     const V3GraphVertex* moveVxp;
     while ((moveVxp = emit_logic.nextp())) {
         const MTaskMoveVertex* const movep = static_cast<const MTaskMoveVertex*>(moveVxp);
@@ -1332,8 +1326,7 @@ void OrderProcess::processMTasks() {
         // information in V3EmitC when we lay out var's in memory.
         const OrderLogicVertex* const logicp = movep->logicp();
         for (const V3GraphEdge* edgep = logicp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-            const OrderVarVertex* const pre_varp
-                = dynamic_cast<const OrderVarVertex*>(edgep->fromp());
+            const OrderVarVertex* const pre_varp = edgep->fromp()->cast<const OrderVarVertex>();
             if (!pre_varp) continue;
             AstVar* const varp = pre_varp->vscp()->varp();
             // varp depends on logicp, so logicp produces varp,
@@ -1341,8 +1334,7 @@ void OrderProcess::processMTasks() {
             varp->addProducingMTaskId(mtaskId);
         }
         for (const V3GraphEdge* edgep = logicp->outBeginp(); edgep; edgep = edgep->outNextp()) {
-            const OrderVarVertex* const post_varp
-                = dynamic_cast<const OrderVarVertex*>(edgep->top());
+            const OrderVarVertex* const post_varp = edgep->top()->cast<const OrderVarVertex>();
             if (!post_varp) continue;
             AstVar* const varp = post_varp->vscp()->varp();
             varp->addConsumingMTaskId(mtaskId);
@@ -1443,7 +1435,7 @@ void OrderProcess::process(bool multiThreaded) {
         processMoveBuildGraph();
         // Different prefix (ordermv) as it's not the same graph
         if (dumpGraphLevel() >= 4) m_pomGraph.dumpDotFilePrefixed(m_tag + "_ordermv_start");
-        m_pomGraph.removeRedundantEdges(&V3GraphEdge::followAlwaysTrue);
+        m_pomGraph.removeRedundantEdgesMax(&V3GraphEdge::followAlwaysTrue);
         if (dumpGraphLevel() >= 4) m_pomGraph.dumpDotFilePrefixed(m_tag + "_ordermv_simpl");
 
         UINFO(2, "  Move...\n");
@@ -1476,7 +1468,8 @@ AstCFunc* order(AstNetlist* netlistp,  //
 
     // Create the result function
     AstScope* const scopeTopp = netlistp->topScopep()->scopep();
-    AstCFunc* const funcp = new AstCFunc{netlistp->fileline(), "_eval_" + tag, scopeTopp, ""};
+    FileLine* const flp = netlistp->fileline();
+    AstCFunc* const funcp = new AstCFunc{flp, "_eval_" + tag, scopeTopp, ""};
     funcp->dontCombine(true);
     funcp->isStatic(false);
     funcp->isLoose(true);
@@ -1485,8 +1478,17 @@ AstCFunc* order(AstNetlist* netlistp,  //
     funcp->declPrivate(true);
     scopeTopp->addBlocksp(funcp);
 
+    if (v3Global.opt.profExec()) {
+        funcp->addStmtsp(new AstCStmt{flp, "VL_EXEC_TRACE_ADD_RECORD(vlSymsp).sectionPush(\"func "
+                                               + tag + "\");\n"});
+    }
+
     // Add ordered statements to the result function
     for (AstNode* const nodep : nodeps) funcp->addStmtsp(nodep);
+
+    if (v3Global.opt.profExec()) {
+        funcp->addStmtsp(new AstCStmt{flp, "VL_EXEC_TRACE_ADD_RECORD(vlSymsp).sectionPop();\n"});
+    }
 
     // Dispose of the remnants of the inputs
     for (auto* const lbsp : logic) lbsp->deleteActives();

@@ -26,12 +26,9 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
-#include "V3Ast.h"
 #include "V3Const.h"
-#include "V3Global.h"
 #include "V3Width.h"
 
 VL_DEFINE_DEBUG_FUNCTIONS;
@@ -248,6 +245,7 @@ private:
                         adtypep,
                         "Array extraction with width miscomputed " << adtypep->width() << "/"
                                                                    << fromRange.elements());
+            // cppcheck-suppress zerodivcond
             const int elwidth = adtypep->width() / fromRange.elements();
             AstSel* const newp = new AstSel{
                 nodep->fileline(), fromp,
@@ -348,8 +346,8 @@ private:
         UINFO(6, "SELEXTRACT " << nodep << endl);
         // if (debug() >= 9) nodep->dumpTree("-  SELEX0: ");
         // Below 2 lines may change nodep->widthp()
-        V3Const::constifyParamsEdit(nodep->leftp());  // May relink pointed to node
-        V3Const::constifyParamsEdit(nodep->rightp());  // May relink pointed to node
+        V3Const::constifyParamsNoWarnEdit(nodep->leftp());  // May relink pointed to node
+        V3Const::constifyParamsNoWarnEdit(nodep->rightp());  // May relink pointed to node
         // if (debug() >= 9) nodep->dumpTree("-  SELEX3: ");
         AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
         const FromData fromdata = fromDataForArray(nodep, fromp);

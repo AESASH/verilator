@@ -24,7 +24,7 @@
 
 // Limited V3 headers here - this is a base class for Vlc etc
 #include "V3String.h"
-#ifndef V3ERROR_NO_GLOBAL_
+#ifndef VL_MT_DISABLED_CODE_UNIT
 #include "V3ThreadPool.h"
 #endif
 
@@ -54,17 +54,18 @@ public:
         // Boolean information we track per-line, but aren't errors
         I_CELLDEFINE,   // Inside cell define from `celldefine/`endcelldefine
         I_COVERAGE,     // Coverage is on/off from /*verilator coverage_on/off*/
-        I_TRACING,      // Tracing is on/off from /*verilator tracing_on/off*/
-        I_LINT,         // All lint messages
-        I_UNUSED,       // Unused genvar, parameter or signal message (Backward Compatibility)
         I_DEF_NETTYPE_WIRE,  // `default_nettype is WIRE (false=NONE)
+        I_LINT,         // All lint messages
         I_TIMING,       // Enable timing from /*verilator timing_on/off*/
+        I_TRACING,      // Tracing is on/off from /*verilator tracing_on/off*/
+        I_UNUSED,       // Unused genvar, parameter or signal message (Backward Compatibility)
         // Error codes:
-        E_PORTSHORT,    // Error: Output port is connected to a constant, electrical short
-        E_UNSUPPORTED,  // Error: Unsupported (generally)
-        E_TASKNSVAR,    // Error: Task I/O not simple
+        E_LIFETIME,     // Error: Reference to a variable might outlive the variable.
         E_NEEDTIMINGOPT,  // Error: --timing/--no-timing option not specified
         E_NOTIMING,     // Timing control encountered with --no-timing
+        E_PORTSHORT,    // Error: Output port is connected to a constant, electrical short
+        E_TASKNSVAR,    // Error: Task I/O not simple
+        E_UNSUPPORTED,  // Error: Unsupported (generally)
         //
         // Warning codes:
         EC_FIRST_WARN,  // Just a code so the program knows where to start warnings
@@ -98,6 +99,7 @@ public:
         ENUMVALUE,      // Error: enum type needs explicit cast
         EOFNEWLINE,     // End-of-file missing newline
         GENCLK,         // Generated Clock. Historical, never issued.
+        GENUNNAMED,     // Generate unnamed, without label
         HIERBLOCK,      // Ignored hierarchical block setting
         IFDEPTH,        // If statements too deep
         IGNOREDRETURN,  // Ignoring return value (function as task)
@@ -113,6 +115,7 @@ public:
         LATCH,          // Latch detected outside of always_latch block
         LITENDIAN,      // Little endian, renamed to ASCRANGE
         MINTYPMAXDLY,   // Unsupported: min/typ/max delay expressions
+        MISINDENT,      // Misleading indentation
         MODDUP,         // Duplicate module
         MULTIDRIVEN,    // Driven from multiple blocks
         MULTITOP,       // Multiple top level modules
@@ -133,6 +136,7 @@ public:
         RISEFALLDLY,    // Unsupported: rise/fall/turn-off delays
         SELRANGE,       // Selection index out of range
         SHORTREAL,      // Shortreal not supported
+        SIDEEFFECT,     // Sideeffect ignored
         SPLITVAR,       // Cannot split the variable
         STATICVAR,      // Static variable declared in a loop with a declaration assignment
         STMTDLY,        // Delayed statement
@@ -156,10 +160,10 @@ public:
         VARHIDDEN,      // Hiding variable
         WAITCONST,      // Wait condition is constant
         WIDTH,          // Width mismatch
-        WIDTHTRUNC,     // Width mismatch- lhs < rhs
-        WIDTHEXPAND,    // Width mismatch- lhs > rhs
-        WIDTHXZEXPAND,  // Width mismatch- lhs > rhs xz filled
         WIDTHCONCAT,    // Unsized numbers/parameters in concatenations
+        WIDTHEXPAND,    // Width mismatch- lhs > rhs
+        WIDTHTRUNC,     // Width mismatch- lhs < rhs
+        WIDTHXZEXPAND,  // Width mismatch- lhs > rhs xz filled
         ZERODLY,        // #0 delay
         _ENUM_MAX
         // ***Add new elements below also***
@@ -181,9 +185,9 @@ public:
             // Leading spaces indicate it can't be disabled.
             " MIN", " INFO", " FATAL", " FATALEXIT", " FATALSRC", " ERROR", " FIRST_NAMED",
             // Boolean
-            " I_CELLDEFINE", " I_COVERAGE", " I_TRACING", " I_LINT", " I_UNUSED", " I_DEF_NETTYPE_WIRE", " I_TIMING",
+            " I_CELLDEFINE", " I_COVERAGE",  " I_DEF_NETTYPE_WIRE", " I_LINT", " I_TIMING", " I_TRACING", " I_UNUSED",
             // Errors
-            "PORTSHORT", "UNSUPPORTED", "TASKNSVAR", "NEEDTIMINGOPT", "NOTIMING",
+            "LIFETIME", "NEEDTIMINGOPT", "NOTIMING", "PORTSHORT", "TASKNSVAR", "UNSUPPORTED",
             // Warnings
             " EC_FIRST_WARN",
             "ALWCOMBORDER", "ASCRANGE", "ASSIGNDLY", "ASSIGNIN", "BADSTDPRAGMA",
@@ -191,20 +195,22 @@ public:
             "CASEINCOMPLETE", "CASEOVERLAP", "CASEWITHX", "CASEX", "CASTCONST", "CDCRSTLOGIC", "CLKDATA",
             "CMPCONST", "COLONPLUS", "COMBDLY", "CONSTRAINTIGN", "CONTASSREG",
             "DECLFILENAME", "DEFPARAM", "DEPRECATED",
-            "ENCAPSULATED", "ENDLABEL", "ENUMVALUE", "EOFNEWLINE", "GENCLK", "HIERBLOCK",
+            "ENCAPSULATED", "ENDLABEL", "ENUMVALUE", "EOFNEWLINE", "GENCLK",
+            "GENUNNAMED", "HIERBLOCK",
             "IFDEPTH", "IGNOREDRETURN",
             "IMPERFECTSCH", "IMPLICIT", "IMPLICITSTATIC", "IMPORTSTAR", "IMPURE",
             "INCABSPATH", "INFINITELOOP", "INITIALDLY", "INSECURE",
-            "LATCH", "LITENDIAN", "MINTYPMAXDLY", "MODDUP",
+            "LATCH", "LITENDIAN", "MINTYPMAXDLY", "MISINDENT", "MODDUP",
             "MULTIDRIVEN", "MULTITOP", "NEWERSTD", "NOLATCH", "NULLPORT", "PINCONNECTEMPTY",
             "PINMISSING", "PINNOCONNECT",  "PINNOTFOUND", "PKGNODECL", "PROCASSWIRE",
             "PROFOUTOFDATE", "PROTECTED", "RANDC", "REALCVT", "REDEFMACRO", "RISEFALLDLY",
-            "SELRANGE", "SHORTREAL", "SPLITVAR", "STATICVAR", "STMTDLY", "SYMRSVDWORD", "SYNCASYNCNET",
+            "SELRANGE", "SHORTREAL", "SIDEEFFECT", "SPLITVAR",
+            "STATICVAR", "STMTDLY", "SYMRSVDWORD", "SYNCASYNCNET",
             "TICKCOUNT", "TIMESCALEMOD",
             "UNDRIVEN", "UNOPT", "UNOPTFLAT", "UNOPTTHREADS",
             "UNPACKED", "UNSIGNED", "UNUSEDGENVAR", "UNUSEDPARAM", "UNUSEDSIGNAL",
             "USERERROR", "USERFATAL", "USERINFO", "USERWARN",
-            "VARHIDDEN", "WAITCONST", "WIDTH", "WIDTHTRUNC", "WIDTHEXPAND", "WIDTHXZEXPAND", "WIDTHCONCAT", "ZERODLY",
+            "VARHIDDEN", "WAITCONST", "WIDTH", "WIDTHCONCAT",  "WIDTHEXPAND", "WIDTHTRUNC", "WIDTHXZEXPAND", "ZERODLY",
             " MAX"
         };
         // clang-format on
@@ -227,25 +233,26 @@ public:
     }
     // Warnings to mention manual
     bool mentionManual() const VL_MT_SAFE {
-        return (m_e == EC_FATALSRC || m_e == SYMRSVDWORD || m_e == ZERODLY || pretendError());
+        return (m_e == EC_FATALSRC || m_e == SIDEEFFECT || m_e == SYMRSVDWORD || m_e == ZERODLY
+                || pretendError());
     }
     // Warnings that are lint only
     bool lintError() const VL_MT_SAFE {
         return (m_e == ALWCOMBORDER || m_e == ASCRANGE || m_e == BSSPACE || m_e == CASEINCOMPLETE
                 || m_e == CASEOVERLAP || m_e == CASEWITHX || m_e == CASEX || m_e == CASTCONST
                 || m_e == CMPCONST || m_e == COLONPLUS || m_e == IMPLICIT || m_e == IMPLICITSTATIC
-                || m_e == LATCH || m_e == NEWERSTD || m_e == PINMISSING || m_e == REALCVT
-                || m_e == STATICVAR || m_e == UNSIGNED || m_e == WIDTH || m_e == WIDTHTRUNC
-                || m_e == WIDTHEXPAND || m_e == WIDTHXZEXPAND);
+                || m_e == LATCH || m_e == MISINDENT || m_e == NEWERSTD || m_e == PINMISSING
+                || m_e == REALCVT || m_e == STATICVAR || m_e == UNSIGNED || m_e == WIDTH
+                || m_e == WIDTHTRUNC || m_e == WIDTHEXPAND || m_e == WIDTHXZEXPAND);
     }
     // Warnings that are style only
     bool styleError() const VL_MT_SAFE {
         return (m_e == ASSIGNDLY  // More than style, but for backward compatibility
                 || m_e == BLKSEQ || m_e == DEFPARAM || m_e == DECLFILENAME || m_e == EOFNEWLINE
-                || m_e == IMPORTSTAR || m_e == INCABSPATH || m_e == PINCONNECTEMPTY
-                || m_e == PINNOCONNECT || m_e == SYNCASYNCNET || m_e == UNDRIVEN
-                || m_e == UNUSEDGENVAR || m_e == UNUSEDPARAM || m_e == UNUSEDSIGNAL
-                || m_e == VARHIDDEN);
+                || m_e == GENUNNAMED || m_e == IMPORTSTAR || m_e == INCABSPATH
+                || m_e == PINCONNECTEMPTY || m_e == PINNOCONNECT || m_e == SYNCASYNCNET
+                || m_e == UNDRIVEN || m_e == UNUSEDGENVAR || m_e == UNUSEDPARAM
+                || m_e == UNUSEDSIGNAL || m_e == VARHIDDEN);
     }
     // Warnings that are unused only
     bool unusedError() const VL_MT_SAFE {
@@ -282,9 +289,13 @@ inline std::ostream& operator<<(std::ostream& os, const V3ErrorCode& rhs) {
 }
 
 // ######################################################################
+class V3Error;
+
 class V3ErrorGuarded final {
     // Should only be used by V3ErrorGuarded::m_mutex is already locked
     // contains guarded members
+    friend class V3Error;
+
 public:
     using MessagesSet = std::set<std::string>;
     using ErrorExitCb = void (*)(void);
@@ -315,6 +326,16 @@ private:
         = MAX_ERRORS;  // Option: --error-limit Number of errors before exit
     bool m_warnFatal VL_GUARDED_BY(m_mutex) = true;  // Option: --warnFatal Warnings are fatal
     std::ostringstream m_errorStr VL_GUARDED_BY(m_mutex);  // Error string being formed
+
+    void v3errorPrep(V3ErrorCode code) VL_REQUIRES(m_mutex) {
+        m_errorStr.str("");
+        m_errorCode = code;
+        m_errorContexted = false;
+        m_errorSuppressed = false;
+    }
+    std::ostringstream& v3errorStr() VL_REQUIRES(m_mutex) { return m_errorStr; }
+    void v3errorEnd(std::ostringstream& sstr, const string& extra = "") VL_REQUIRES(m_mutex);
+
 public:
     V3RecursiveMutex m_mutex;  // Make sure only single thread is in class
 
@@ -335,7 +356,7 @@ public:
             v3errorEnd(
                 (v3errorPrep(V3ErrorCode::EC_FATALEXIT),
                  (v3errorStr() << "Exiting due to too many errors encountered; --error-limit="
-                               << errorCount() << endl),
+                               << errorCount() << std::endl),
                  v3errorStr()));
             assert(0);  // LCOV_EXCL_LINE
             VL_UNREACHABLE;
@@ -357,13 +378,6 @@ public:
     int errorLimit() VL_REQUIRES(m_mutex) { return m_errorLimit; }
     void warnFatal(bool flag) VL_REQUIRES(m_mutex) { m_warnFatal = flag; }
     bool warnFatal() VL_REQUIRES(m_mutex) { return m_warnFatal; }
-    void v3errorPrep(V3ErrorCode code) VL_REQUIRES(m_mutex) {
-        m_errorStr.str("");
-        m_errorCode = code;
-        m_errorContexted = false;
-        m_errorSuppressed = false;
-    }
-    std::ostringstream& v3errorStr() VL_REQUIRES(m_mutex) { return m_errorStr; }
     V3ErrorCode errorCode() VL_REQUIRES(m_mutex) { return m_errorCode; }
     bool errorContexted() VL_REQUIRES(m_mutex) { return m_errorContexted; }
     int warnCount() VL_REQUIRES(m_mutex) { return m_warnCount; }
@@ -381,7 +395,6 @@ public:
     void describedWarnings(bool flag) VL_REQUIRES(m_mutex) { m_describedWarnings = flag; }
     int tellManual() VL_REQUIRES(m_mutex) { return m_tellManual; }
     void tellManual(int level) VL_REQUIRES(m_mutex) { m_tellManual = level; }
-    void v3errorEnd(std::ostringstream& sstr, const string& extra = "") VL_REQUIRES(m_mutex);
     void suppressThisWarning() VL_REQUIRES(m_mutex);
     string warnContextNone() VL_REQUIRES(m_mutex) {
         errorContexted(true);
@@ -508,66 +521,44 @@ public:
 
     // Internals for v3error()/v3fatal() macros only
     // Error end takes the string stream to output, be careful to seek() as needed
-    static void v3errorPrep(V3ErrorCode code) VL_MT_SAFE_EXCLUDES(s().m_mutex) {
-        const V3RecursiveLockGuard guard{s().m_mutex};
-        s().v3errorPrep(code);
-    }
-    static std::ostringstream& v3errorStr() VL_MT_SAFE_EXCLUDES(s().m_mutex) {
-        const V3RecursiveLockGuard guard{s().m_mutex};
-        return s().v3errorStr();
-    }
-    static void vlAbort();
+    static void v3errorAcquireLock(bool checkStopRequest) VL_ACQUIRE(s().m_mutex);
+    static std::ostringstream& v3errorPrep(V3ErrorCode code, bool mtDisabledCodeUnit)
+        VL_ACQUIRE(s().m_mutex);
+    static std::ostringstream& v3errorPrepFileLine(V3ErrorCode code, const char* file, int line,
+                                                   bool mtDisabledCodeUnit)
+        VL_ACQUIRE(s().m_mutex);
+    static std::ostringstream& v3errorStr() VL_REQUIRES(s().m_mutex);
     // static, but often overridden in classes.
     static void v3errorEnd(std::ostringstream& sstr, const string& extra = "")
-        VL_MT_SAFE_EXCLUDES(s().m_mutex) VL_MT_SAFE {
-        const V3RecursiveLockGuard guard{s().m_mutex};
-        s().v3errorEnd(sstr, extra);
-    }
-    // We can't call 's().v3errorEnd' directly in 'v3ErrorEnd'/'v3errorEndFatal',
-    // due to bug in GCC (tested on 11.3.0 version with --enable-m32)
-    // causing internal error when backtrace is printed.
-    // Instead use this wrapper.
-    static void v3errorEndGuardedCall(std::ostringstream& sstr, const string& extra = "")
-        VL_REQUIRES(s().m_mutex) VL_MT_SAFE {
-        s().v3errorEnd(sstr, extra);
-    }
+        VL_RELEASE(s().m_mutex);
+    static void vlAbort();
 };
 
-// Global versions, so that if the class doesn't define a operator, we get the functions anyways.
-inline void v3errorEnd(std::ostringstream& sstr) VL_REQUIRES(V3Error::s().m_mutex) VL_MT_SAFE {
-    V3Error::v3errorEndGuardedCall(sstr);
-}
-inline void v3errorEndFatal(std::ostringstream& sstr)
-    VL_REQUIRES(V3Error::s().m_mutex) VL_MT_SAFE {
-    V3Error::v3errorEndGuardedCall(sstr);
-    assert(0);  // LCOV_EXCL_LINE
-    VL_UNREACHABLE;
-}
+// Global versions, so that if the class doesn't define an operator, we get the functions anyway.
+void v3errorEnd(std::ostringstream& sstr) VL_RELEASE(V3Error::s().m_mutex) VL_MT_SAFE;
+void v3errorEndFatal(std::ostringstream& sstr)
+    VL_RELEASE(V3Error::s().m_mutex) VL_MT_SAFE VL_ATTR_NORETURN;
 
-#ifndef V3ERROR_NO_GLOBAL_
-#define V3ErrorLockAndCheckStopRequested \
-    V3Error::s().m_mutex.lockCheckStopRequest( \
-        []() -> void { V3ThreadPool::s().waitIfStopRequested(); })
+#ifdef VL_MT_DISABLED_CODE_UNIT
+#define VL_MT_DISABLED_CODE_UNIT_DEFINED 1
 #else
-#define V3ErrorLockAndCheckStopRequested V3Error::s().m_mutex.lock()
+#define VL_MT_DISABLED_CODE_UNIT_DEFINED 0
 #endif
 
 // Theses allow errors using << operators: v3error("foo"<<"bar");
-// Careful, you can't put () around msg, as you would in most macro definitions
-// Note the commas are the comma operator, not separating arguments. These are needed to ensure
-// evaluation order as otherwise we couldn't ensure v3errorPrep is called first.
-// Note: due to limitations of clang thread-safety analysis, we can't use
-// lock guard here, instead we are locking the mutex as first operation in temporary,
-// but we are unlocking the mutex after function using comma operator.
-// This way macros should also work when they are in 'if' stmt without '{}'.
+// Careful, you can't put () around msg, as you would in most macro definitions.
+// 'V3Error::v3errorPrep(code) << msg' could be more efficient but the order of function calls in a
+// single statement can be arbitrary until C++17, thus make it possible to execute
+// V3Error::v3errorPrep that acquires the lock after functions in the msg may require it. So we use
+// the comma operator (,) to guarantee the execution order here.
+#define v3errorBuildMessage(prep, msg) \
+    (prep, static_cast<std::ostringstream&>(V3Error::v3errorStr() << msg))
 #define v3warnCode(code, msg) \
-    v3errorEnd((V3ErrorLockAndCheckStopRequested, V3Error::s().v3errorPrep(code), \
-                (V3Error::s().v3errorStr() << msg), V3Error::s().v3errorStr())), \
-        V3Error::s().m_mutex.unlock()
+    v3errorEnd( \
+        v3errorBuildMessage(V3Error::v3errorPrep(code, VL_MT_DISABLED_CODE_UNIT_DEFINED), msg))
 #define v3warnCodeFatal(code, msg) \
-    v3errorEndFatal((V3ErrorLockAndCheckStopRequested, V3Error::s().v3errorPrep(code), \
-                     (V3Error::s().v3errorStr() << msg), V3Error::s().v3errorStr())), \
-        V3Error::s().m_mutex.unlock()
+    v3errorEndFatal( \
+        v3errorBuildMessage(V3Error::v3errorPrep(code, VL_MT_DISABLED_CODE_UNIT_DEFINED), msg))
 #define v3warn(code, msg) v3warnCode(V3ErrorCode::code, msg)
 #define v3info(msg) v3warnCode(V3ErrorCode::EC_INFO, msg)
 #define v3error(msg) v3warnCode(V3ErrorCode::EC_ERROR, msg)
@@ -576,24 +567,24 @@ inline void v3errorEndFatal(std::ostringstream& sstr)
 #define v3fatalExit(msg) v3warnCodeFatal(V3ErrorCode::EC_FATALEXIT, msg)
 // Use this instead of fatal() to mention the source code line.
 #define v3fatalSrc(msg) \
-    v3warnCodeFatal(V3ErrorCode::EC_FATALSRC, \
-                    __FILE__ << ":" << std::dec << __LINE__ << ": " << msg)
+    v3errorEndFatal(v3errorBuildMessage( \
+        V3Error::v3errorPrepFileLine(V3ErrorCode::EC_FATALSRC, __FILE__, __LINE__, \
+                                     VL_MT_DISABLED_CODE_UNIT_DEFINED), \
+        msg))
 // Use this when normal v3fatal is called in static method that overrides fileline.
 #define v3fatalStatic(msg) \
-    (::v3errorEndFatal((V3ErrorLockAndCheckStopRequested, \
-                        V3Error::s().v3errorPrep(V3ErrorCode::EC_FATAL), \
-                        (V3Error::s().v3errorStr() << msg), V3Error::s().v3errorStr()))), \
-        V3Error::s().m_mutex.unlock()
+    ::v3errorEndFatal(v3errorBuildMessage( \
+        V3Error::v3errorPrep(V3ErrorCode::EC_FATAL, VL_MT_DISABLED_CODE_UNIT_DEFINED), msg))
 
 #define UINFO(level, stmsg) \
     do { \
         if (VL_UNCOVERABLE(debug() >= (level))) { \
-            cout << "- " << V3Error::lineStr(__FILE__, __LINE__) << stmsg; \
+            std::cout << "- " << V3Error::lineStr(__FILE__, __LINE__) << stmsg; \
         } \
     } while (false)
 #define UINFONL(level, stmsg) \
     do { \
-        if (VL_UNCOVERABLE(debug() >= (level))) { cout << stmsg; } \
+        if (VL_UNCOVERABLE(debug() >= (level))) { std::cout << stmsg; } \
     } while (false)
 
 #ifdef VL_DEBUG

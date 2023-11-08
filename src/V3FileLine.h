@@ -121,7 +121,7 @@ std::ostream& operator<<(std::ostream& os, VFileContent* contentp);
 
 // File and line number of an object, mostly for error reporting
 
-// This class is instantiated for every source code line (potentially millions), and  instances
+// This class is instantiated for every source code line (potentially millions), and instances
 // created at any point usually persist until the end of the program. To save space, per-file
 // information (e.g. filename, source language) is held in tables in the FileLineSingleton class.
 // Similarly, message enablement flags are interned in FileLineSingleton.
@@ -195,7 +195,9 @@ public:
         , m_parent{fromp->m_parent} {
         if (m_contentp) m_contentp->refInc();
     }
+    void applyIgnores();
     FileLine* copyOrSameFileLine();
+    FileLine* copyOrSameFileLineApplied();
     static void deleteAllRemaining();
     ~FileLine();
 #ifdef VL_LEAK_CHECKS
@@ -208,6 +210,7 @@ public:
         lineno(num);
         m_contentLineno = static_cast<unsigned>(num);
     }
+    void contentLinenoFrom(const FileLine* fromp) { m_contentLineno = fromp->m_contentLineno; }
     void lineno(int num) {
         m_firstLineno = num;
         m_lastLineno = num;
@@ -221,6 +224,8 @@ public:
     void filename(const string& name) { m_filenameno = singleton().nameToNumber(name); }
     void parent(FileLine* fileline) { m_parent = fileline; }
     void lineDirective(const char* textp, int& enterExitRef);
+    void lineDirectiveParse(const char* textp, string& filenameRef, int& linenoRef,
+                            int& enterExitRef);
     void linenoInc() {
         m_lastLineno++;
         m_lastColumn = 1;
@@ -241,6 +246,7 @@ public:
     // as the parser errors etc generally make more sense pointing at the last parse point
     int lineno() const VL_MT_SAFE { return m_lastLineno; }
     string source() const VL_MT_SAFE;
+    string sourcePrefix(int toColumn) const VL_MT_SAFE;
     string prettySource() const VL_MT_SAFE;  // Source, w/stripped unprintables and newlines
     FileLine* parent() const VL_MT_SAFE { return m_parent; }
     V3LangCode language() const { return singleton().numberToLang(filenameno()); }
@@ -317,9 +323,9 @@ public:
 
     // OPERATORS
     void v3errorEnd(std::ostringstream& str, const string& extra = "")
-        VL_REQUIRES(V3Error::s().m_mutex);
+        VL_RELEASE(V3Error::s().m_mutex);
     void v3errorEndFatal(std::ostringstream& str) VL_ATTR_NORETURN
-        VL_REQUIRES(V3Error::s().m_mutex) {
+        VL_RELEASE(V3Error::s().m_mutex) {
         v3errorEnd(str);
         assert(0);  // LCOV_EXCL_LINE
         VL_UNREACHABLE;

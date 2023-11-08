@@ -22,6 +22,7 @@
 
 #include "V3Error.h"
 #include "V3LangCode.h"
+#include "V3ThreadSafety.h"
 
 #include <map>
 #include <set>
@@ -223,6 +224,7 @@ private:
     bool m_autoflush = false;       // main switch: --autoflush
     bool m_bboxSys = false;         // main switch: --bbox-sys
     bool m_bboxUnsup = false;       // main switch: --bbox-unsup
+    bool m_binary = false;          // main switch: --binary
     bool m_build = false;           // main switch: --build
     bool m_cmake = false;           // main switch: --make cmake
     bool m_context = true;          // main switch: --Wcontext
@@ -235,6 +237,7 @@ private:
     bool m_debugEmitV = false;      // main switch: --debug-emitv
     bool m_debugExitParse = false;  // main switch: --debug-exit-parse
     bool m_debugExitUvm = false;    // main switch: --debug-exit-uvm
+    bool m_debugExitUvm23 = false;  // main switch: --debug-exit-uvm23
     bool m_debugLeak = true;        // main switch: --debug-leak
     bool m_debugNondeterminism = false;  // main switch: --debug-nondeterminism
     bool m_debugPartition = false;  // main switch: --debug-partition
@@ -280,6 +283,7 @@ private:
     bool m_traceCoverage = false;   // main switch: --trace-coverage
     bool m_traceParams = true;      // main switch: --trace-params
     bool m_traceStructs = false;    // main switch: --trace-structs
+    bool m_noTraceTop = false;      // main switch: --no-trace-top
     bool m_traceUnderscore = false; // main switch: --trace-underscore
     bool m_underlineZero = false;   // main switch: --underline-zero; undocumented old Verilator 2
     bool m_verilate = true;         // main switch: --verilate
@@ -330,6 +334,7 @@ private:
     string      m_flags;        // main switch: -f {name}
     string      m_l2Name;       // main switch: --l2name; "" for top-module's name
     string      m_libCreate;    // main switch: --lib-create {lib_name}
+    string      m_mainTopName;  // main switch: --main-top-name
     string      m_makeDir;      // main switch: -Mdir
     string      m_modPrefix;    // main switch: --mod-prefix
     string      m_pipeFilter;   // main switch: --pipe-filter
@@ -373,6 +378,7 @@ private:
     bool m_fSubst;       // main switch: -fno-subst: substitute expression temp values
     bool m_fSubstConst;  // main switch: -fno-subst-const: final constant substitution
     bool m_fTable;       // main switch: -fno-table: lookup table creation
+    bool m_fTaskifyAll = false;  // main switch: --ftaskify-all-forked
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -380,7 +386,7 @@ private:
 private:
     // METHODS
     void addArg(const string& arg);
-    void addDefine(const string& defline, bool allowPlus);
+    void addDefine(const string& defline, bool allowPlus) VL_MT_DISABLED;
     void addFuture(const string& flag);
     void addFuture0(const string& flag);
     void addFuture1(const string& flag);
@@ -421,7 +427,7 @@ public:
     void addForceInc(const string& filename);
     bool available() const VL_MT_SAFE { return m_available; }
     void ccSet();
-    void notify();
+    void notify() VL_MT_DISABLED;
 
     // ACCESSORS (options)
     bool preprocOnly() const { return m_preprocOnly; }
@@ -439,6 +445,7 @@ public:
     bool autoflush() const { return m_autoflush; }
     bool bboxSys() const { return m_bboxSys; }
     bool bboxUnsup() const { return m_bboxUnsup; }
+    bool binary() const { return m_binary; }
     bool build() const { return m_build; }
     string buildDepBin() const { return m_buildDepBin; }
     void buildDepBin(const string& flag) { m_buildDepBin = flag; }
@@ -456,6 +463,7 @@ public:
     bool debugEmitV() const VL_MT_SAFE { return m_debugEmitV; }
     bool debugExitParse() const { return m_debugExitParse; }
     bool debugExitUvm() const { return m_debugExitUvm; }
+    bool debugExitUvm23() const { return m_debugExitUvm23; }
     bool debugLeak() const { return m_debugLeak; }
     bool debugNondeterminism() const { return m_debugNondeterminism; }
     bool debugPartition() const { return m_debugPartition; }
@@ -541,7 +549,7 @@ public:
     int traceThreads() const { return m_traceThreads; }
     bool useTraceOffload() const { return trace() && traceFormat().fst() && traceThreads() > 1; }
     bool useTraceParallel() const {
-        return trace() && traceFormat().vcd() && threads() && (threads() > 1 || hierChild() > 1);
+        return trace() && traceFormat().vcd() && (threads() > 1 || hierChild() > 1);
     }
     bool useFstWriterThread() const { return traceThreads() && traceFormat().fst(); }
     unsigned vmTraceThreads() const {
@@ -567,6 +575,7 @@ public:
         }
         return libName;
     }
+    string mainTopName() const { return m_mainTopName; }
     string makeDir() const VL_MT_SAFE { return m_makeDir; }
     string modPrefix() const VL_MT_SAFE { return m_modPrefix; }
     string pipeFilter() const { return m_pipeFilter; }
@@ -575,6 +584,7 @@ public:
     bool protectKeyProvided() const { return !m_protectKey.empty(); }
     string protectKeyDefaulted() VL_MT_SAFE;  // Set default key if not set by user
     string topModule() const { return m_topModule; }
+    bool noTraceTop() const { return m_noTraceTop; }
     string unusedRegexp() const { return m_unusedRegexp; }
     string waiverOutput() const { return m_waiverOutput; }
     bool isWaiverOutput() const { return !m_waiverOutput.empty(); }
@@ -631,6 +641,7 @@ public:
     bool fSubst() const { return m_fSubst; }
     bool fSubstConst() const { return m_fSubstConst; }
     bool fTable() const { return m_fTable; }
+    bool fTaskifyAll() const { return m_fTaskifyAll; }
 
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
@@ -656,9 +667,9 @@ public:
     // Return options for child hierarchical blocks when forTop==false, otherwise returns args for
     // the top module.
     string allArgsStringForHierBlock(bool forTop) const;
-    void parseOpts(FileLine* fl, int argc, char** argv);
-    void parseOptsList(FileLine* fl, const string& optdir, int argc, char** argv);
-    void parseOptsFile(FileLine* fl, const string& filename, bool rel);
+    void parseOpts(FileLine* fl, int argc, char** argv) VL_MT_DISABLED;
+    void parseOptsList(FileLine* fl, const string& optdir, int argc, char** argv) VL_MT_DISABLED;
+    void parseOptsFile(FileLine* fl, const string& filename, bool rel) VL_MT_DISABLED;
 
     // METHODS (environment)
     // Most of these may be built into the executable with --enable-defenv,

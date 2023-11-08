@@ -14,13 +14,10 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstMT.h"
 
-#include "V3Ast.h"
 #include "V3EmitCBase.h"
 #include "V3File.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 #include "V3Hasher.h"
 #include "V3PartitionGraph.h"  // Just for mtask dumping
@@ -50,6 +47,7 @@ AstIface* AstIfaceRefDType::ifaceViaCellp() const {
 const char* AstNodeFTaskRef::broken() const {
     BROKEN_RTN(m_taskp && !m_taskp->brokeExists());
     BROKEN_RTN(m_classOrPackagep && !m_classOrPackagep->brokeExists());
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != getPurityRecurse());
     return nullptr;
 }
 
@@ -60,12 +58,29 @@ void AstNodeFTaskRef::cloneRelink() {
     }
 }
 
-bool AstNodeFTaskRef::isPure() const {
-    // TODO: For non-DPI functions we could traverse the AST of function's body to determine
-    // pureness.
-    return this->taskp() && this->taskp()->dpiImport() && this->taskp()->pure();
+bool AstNodeFTaskRef::isPure() {
+    if (!this->taskp()) {
+        // The task isn't linked yet, so it's assumed that it is impure, but the value shouldn't be
+        // cached.
+        return false;
+    } else {
+        if (!m_purity.isCached()) m_purity.set(this->getPurityRecurse());
+        return m_purity.get();
+    }
 }
 
+bool AstNodeFTaskRef::getPurityRecurse() const {
+    AstNodeFTask* const taskp = this->taskp();
+    // Unlinked yet, so treat as impure
+    if (!taskp) return false;
+
+    // First compute the purity of arguments
+    for (AstNode* pinp = this->pinsp(); pinp; pinp = pinp->nextp()) {
+        if (!pinp->isPure()) return false;
+    }
+
+    return taskp->isPure();
+}
 bool AstNodeFTaskRef::isGateOptimizable() const { return m_taskp && m_taskp->isGateOptimizable(); }
 
 const char* AstNodeVarRef::broken() const {
@@ -83,12 +98,6 @@ void AstNodeVarRef::cloneRelink() {
     }
 }
 
-string AstNodeVarRef::selfPointerProtect(bool useSelfForThis) const {
-    const string& sp
-        = useSelfForThis ? VString::replaceWord(selfPointer(), "this", "vlSelf") : selfPointer();
-    return VIdProtect::protectWordsIf(sp, protect());
-}
-
 void AstAddrOfCFunc::cloneRelink() {
     if (m_funcp && m_funcp->clonep()) m_funcp = m_funcp->clonep();
 }
@@ -103,29 +112,8 @@ int AstNodeSel::bitConst() const {
     return (constp ? constp->toSInt() : 0);
 }
 
-void AstNodeUOrStructDType::repairMemberCache() {
-    clearCache();
-    for (AstMemberDType* itemp = membersp(); itemp; itemp = VN_AS(itemp->nextp(), MemberDType)) {
-        if (m_members.find(itemp->name()) != m_members.end()) {
-            itemp->v3error("Duplicate declaration of member name: " << itemp->prettyNameQ());
-        } else {
-            m_members.emplace(itemp->name(), itemp);
-        }
-    }
-}
-
 const char* AstNodeUOrStructDType::broken() const {
     BROKEN_RTN(m_classOrPackagep && !m_classOrPackagep->brokeExists());
-    std::unordered_set<AstMemberDType*> exists;
-    for (AstMemberDType* itemp = membersp(); itemp; itemp = VN_AS(itemp->nextp(), MemberDType)) {
-        exists.insert(itemp);
-    }
-    for (MemberNameMap::const_iterator it = m_members.begin(); it != m_members.end(); ++it) {
-        if (VL_UNCOVERABLE(exists.find(it->second) == exists.end())) {
-            this->v3error("Internal: Structure member broken: " << it->first);
-            return "member broken";
-        }
-    }
     return nullptr;
 }
 
@@ -147,14 +135,65 @@ const char* AstNodeCCall::broken() const {
     BROKEN_RTN(m_funcp && !m_funcp->brokeExists());
     return nullptr;
 }
-bool AstNodeCCall::isPure() const { return funcp()->pure(); }
-
-string AstCCall::selfPointerProtect(bool useSelfForThis) const {
-    const string& sp
-        = useSelfForThis ? VString::replaceWord(selfPointer(), "this", "vlSelf") : selfPointer();
-    return VIdProtect::protectWordsIf(sp, protect());
+bool AstNodeCCall::isPure() { return funcp()->dpiPure(); }
+bool AstNodeUniop::isPure() {
+    if (!m_purity.isCached()) m_purity.set(lhsp()->isPure());
+    return m_purity.get();
+}
+const char* AstNodeUniop::broken() const {
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != lhsp()->isPure());
+    return nullptr;
+}
+bool AstNodeBiop::isPure() {
+    if (!m_purity.isCached()) m_purity.set(getPurityRecurse());
+    return m_purity.get();
+}
+const char* AstNodeBiop::broken() const {
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != getPurityRecurse());
+    return nullptr;
 }
 
+bool AstNodeTriop::isPure() {
+    if (!m_purity.isCached()) m_purity.set(getPurityRecurse());
+    return m_purity.get();
+}
+const char* AstNodeTriop::broken() const {
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != getPurityRecurse());
+    return nullptr;
+}
+
+bool AstNodePreSel::isPure() {
+    if (!m_purity.isCached()) m_purity.set(getPurityRecurse());
+    return m_purity.get();
+}
+const char* AstNodePreSel::broken() const {
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != getPurityRecurse());
+    return nullptr;
+}
+
+bool AstNodeQuadop::isPure() {
+    if (!m_purity.isCached()) m_purity.set(getPurityRecurse());
+    return m_purity.get();
+}
+const char* AstNodeQuadop::broken() const {
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != getPurityRecurse());
+    return nullptr;
+}
+
+AstNodeCond::AstNodeCond(VNType t, FileLine* fl, AstNodeExpr* condp, AstNodeExpr* thenp,
+                         AstNodeExpr* elsep)
+    : AstNodeTriop{t, fl, condp, thenp, elsep} {
+    UASSERT_OBJ(thenp, this, "No thenp expression");
+    UASSERT_OBJ(elsep, this, "No elsep expression");
+    if (thenp->isClassHandleValue() && elsep->isClassHandleValue()) {
+        // Get the most-deriving class type that both arguments can be casted to.
+        AstNodeDType* const commonClassTypep = getCommonClassTypep(thenp, elsep);
+        UASSERT_OBJ(commonClassTypep, this, "No common base class exists");
+        dtypep(commonClassTypep);
+    } else {
+        dtypeFrom(thenp);
+    }
+}
 void AstNodeCond::numberOperate(V3Number& out, const V3Number& lhs, const V3Number& rhs,
                                 const V3Number& ths) {
     if (lhs.isNeqZero()) {
@@ -234,12 +273,10 @@ int AstBasicDType::widthTotalBytes() const {
 }
 
 bool AstBasicDType::same(const AstNode* samep) const {
-    const AstBasicDType* const sp = static_cast<const AstBasicDType*>(samep);
-    if (!rangep() && !sp->rangep() && m == sp->m) {
-        return true;
-    } else {
-        return m == sp->m && rangep() && rangep()->sameTree(sp->rangep());
-    }
+    const AstBasicDType* const sp = VN_DBG_AS(samep, BasicDType);
+    if (!(m == sp->m) || numeric() != sp->numeric()) return false;
+    if (!rangep() && !sp->rangep()) return true;
+    return rangep() && rangep()->sameTree(sp->rangep());
 }
 
 int AstNodeUOrStructDType::widthTotalBytes() const {
@@ -288,17 +325,17 @@ AstNodeBiop* AstEqWild::newTyped(FileLine* fl, AstNodeExpr* lhsp, AstNodeExpr* r
     }
 }
 
-AstExecGraph::AstExecGraph(FileLine* fileline, const string& name)
-    : ASTGEN_SUPER_ExecGraph(fileline)
-    , m_depGraphp{new V3Graph}
-    , m_name{name} {}
+AstExecGraph::AstExecGraph(FileLine* fileline, const string& name) VL_MT_DISABLED
+    : ASTGEN_SUPER_ExecGraph(fileline),
+      m_depGraphp{new V3Graph},
+      m_name{name} {}
 
 AstExecGraph::~AstExecGraph() { VL_DO_DANGLING(delete m_depGraphp, m_depGraphp); }
 
 AstNodeExpr* AstInsideRange::newAndFromInside(AstNodeExpr* exprp, AstNodeExpr* lhsp,
                                               AstNodeExpr* rhsp) {
-    AstNodeExpr* const ap = new AstGte{fileline(), exprp->cloneTree(true), lhsp};
-    AstNodeExpr* const bp = new AstLte{fileline(), exprp->cloneTree(true), rhsp};
+    AstNodeExpr* const ap = new AstGte{fileline(), exprp->cloneTreePure(true), lhsp};
+    AstNodeExpr* const bp = new AstLte{fileline(), exprp->cloneTreePure(true), rhsp};
     ap->fileline()->modifyWarnOff(V3ErrorCode::UNSIGNED, true);
     bp->fileline()->modifyWarnOff(V3ErrorCode::CMPCONST, true);
     return new AstAnd{fileline(), ap, bp};
@@ -399,14 +436,15 @@ string AstVar::verilogKwd() const {
 }
 
 string AstVar::vlArgType(bool named, bool forReturn, bool forFunc, const string& namespc,
-                         bool asRef) const VL_MT_STABLE {
+                         bool asRef) const {
     UASSERT_OBJ(!forReturn, this,
                 "Internal data is never passed as return, but as first argument");
     string ostatic;
     if (isStatic() && namespc.empty()) ostatic = "static ";
 
     const bool isRef = isDpiOpenArray()
-                       || (forFunc && (isWritable() || direction().isRefOrConstRef())) || asRef;
+                       || (forFunc && (isWritable() || this->isRef() || this->isConstRef()))
+                       || asRef;
 
     if (forFunc && isReadOnly() && isRef) ostatic = ostatic + "const ";
 
@@ -428,6 +466,8 @@ string AstVar::vlEnumType() const {
         return "VLVT_PTR";
     } else if (strtype) {
         arg += "VLVT_STRING";
+    } else if (isDouble()) {
+        arg += "VLVT_REAL";
     } else if (widthMin() <= 8) {
         arg += "VLVT_UINT8";
     } else if (widthMin() <= 16) {
@@ -520,7 +560,7 @@ string AstVar::cPubArgType(bool named, bool forReturn) const {
     if (forReturn) named = false;
     string arg;
     if (isWide() && isReadOnly()) arg += "const ";
-    const bool isRef = !forReturn && (isWritable() || direction().isRefOrConstRef());
+    const bool isRef = !forReturn && (isWritable() || this->isRef() || this->isConstRef());
     if (VN_IS(dtypeSkipRefp(), BasicDType) && !dtypeSkipRefp()->isDouble()
         && !dtypeSkipRefp()->isString()) {
         // Backward compatible type declaration
@@ -648,13 +688,14 @@ string AstVar::dpiTmpVarType(const string& varName) const {
 
 string AstVar::scType() const {
     if (isScBigUint()) {
-        return (string{"sc_biguint<"} + cvtToStr(widthMin())
+        return (string{"sc_dt::sc_biguint<"} + cvtToStr(widthMin())
                 + "> ");  // Keep the space so don't get >>
     } else if (isScUint()) {
-        return (string{"sc_uint<"} + cvtToStr(widthMin())
+        return (string{"sc_dt::sc_uint<"} + cvtToStr(widthMin())
                 + "> ");  // Keep the space so don't get >>
     } else if (isScBv()) {
-        return (string{"sc_bv<"} + cvtToStr(widthMin()) + "> ");  // Keep the space so don't get >>
+        return (string{"sc_dt::sc_bv<"} + cvtToStr(widthMin())
+                + "> ");  // Keep the space so don't get >>
     } else if (widthMin() == 1) {
         return "bool";
     } else if (widthMin() <= VL_IDATASIZE) {
@@ -716,12 +757,12 @@ public:
     }
 };
 
-string AstNodeDType::cType(const string& name, bool /*forFunc*/, bool isRef) const VL_MT_STABLE {
+string AstNodeDType::cType(const string& name, bool /*forFunc*/, bool isRef) const {
     const CTypeRecursed info = cTypeRecurse(false);
     return info.render(name, isRef);
 }
 
-AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const VL_MT_STABLE {
+AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
     // Legacy compound argument currently just passed through and unused
     CTypeRecursed info;
 
@@ -730,6 +771,8 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const VL_M
         const CTypeRecursed key = adtypep->keyDTypep()->cTypeRecurse(true);
         const CTypeRecursed val = adtypep->subDTypep()->cTypeRecurse(true);
         info.m_type = "VlAssocArray<" + key.m_type + ", " + val.m_type + ">";
+    } else if (const auto* const adtypep = VN_CAST(dtypep, CDType)) {
+        info.m_type = adtypep->name();
     } else if (const auto* const adtypep = VN_CAST(dtypep, WildcardArrayDType)) {
         const CTypeRecursed sub = adtypep->subDTypep()->cTypeRecurse(true);
         info.m_type = "VlAssocArray<std::string, " + sub.m_type + ">";
@@ -784,8 +827,10 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const VL_M
             info.m_type = "VlDynamicTriggerScheduler";
         } else if (bdtypep->isForkSync()) {
             info.m_type = "VlForkSync";
+        } else if (bdtypep->isProcessRef()) {
+            info.m_type = "VlProcessRef";
         } else if (bdtypep->isEvent()) {
-            info.m_type = "VlEvent";
+            info.m_type = v3Global.assignsEvents() ? "VlAssignableEvent" : "VlEvent";
         } else if (dtypep->widthMin() <= 8) {  // Handle unpacked arrays; not bdtypep->width
             info.m_type = "CData" + bitvec;
         } else if (dtypep->widthMin() <= 16) {
@@ -1069,6 +1114,15 @@ AstVoidDType* AstTypeTable::findVoidDType(FileLine* fl) {
     return m_voidp;
 }
 
+AstStreamDType* AstTypeTable::findStreamDType(FileLine* fl) {
+    if (VL_UNLIKELY(!m_streamp)) {
+        AstStreamDType* const newp = new AstStreamDType{fl};
+        addTypesp(newp);
+        m_streamp = newp;
+    }
+    return m_streamp;
+}
+
 AstQueueDType* AstTypeTable::findQueueIndexDType(FileLine* fl) {
     if (VL_UNLIKELY(!m_queueIndexp)) {
         AstQueueDType* const newp = new AstQueueDType{fl, AstNode::findUInt32DType(), nullptr};
@@ -1124,13 +1178,10 @@ AstBasicDType* AstTypeTable::findLogicBitDType(FileLine* fl, VBasicDTypeKwd kwd,
 AstBasicDType* AstTypeTable::findInsertSameDType(AstBasicDType* nodep) {
     const VBasicTypeKey key{nodep->width(), nodep->widthMin(), nodep->numeric(), nodep->keyword(),
                             nodep->nrange()};
-    DetailedMap& mapr = m_detailedMap;
-    const auto it = mapr.find(key);
-    if (it != mapr.end()) return it->second;
-    mapr.emplace(key, nodep);
-    nodep->generic(true);
+    auto pair = m_detailedMap.emplace(key, nodep);
+    if (pair.second) nodep->generic(true);
     // No addTypesp; the upper function that called new() is responsible for adding
-    return nodep;
+    return pair.first->second;
 }
 
 AstConstPool::AstConstPool(FileLine* fl)
@@ -1328,7 +1379,6 @@ void AstNode::dump(std::ostream& str) const {
     if (user2p()) str << " u2=" << nodeAddr(user2p());
     if (user3p()) str << " u3=" << nodeAddr(user3p());
     if (user4p()) str << " u4=" << nodeAddr(user4p());
-    if (user5p()) str << " u5=" << nodeAddr(user5p());
     if (hasDType()) {
         // Final @ so less likely to by accident read it as a nodep
         if (dtypep() == this) {
@@ -1352,6 +1402,7 @@ void AstNode::dump(std::ostream& str) const {
 void AstNodeProcedure::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     if (isSuspendable()) str << " [SUSP]";
+    if (needProcess()) str << " [NPRC]";
 }
 
 void AstAlways::dump(std::ostream& str) const {
@@ -1401,7 +1452,7 @@ const char* AstCell::broken() const {
 void AstCellInline::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     str << " -> " << origModName();
-    str << " [scopep=" << reinterpret_cast<const void*>(scopep()) << "]";
+    str << " [scopep=" << nodeAddr(scopep()) << "]";
 }
 const char* AstCellInline::broken() const {
     BROKEN_RTN(m_scopep && !m_scopep->brokeExists());
@@ -1415,29 +1466,10 @@ const char* AstClassPackage::broken() const {
 void AstClassPackage::cloneRelink() {
     if (m_classp && m_classp->clonep()) m_classp = m_classp->clonep();
 }
-void AstClass::insertCache(AstNode* nodep) {
-    const bool doit = (VN_IS(nodep, Var) || VN_IS(nodep, EnumItemRef)
-                       || (VN_IS(nodep, NodeFTask) && !VN_AS(nodep, NodeFTask)->isExternProto())
-                       || VN_IS(nodep, CFunc));
-    if (doit) {
-        if (m_members.find(nodep->name()) != m_members.end()) {
-            nodep->v3error("Duplicate declaration of member name: " << nodep->prettyNameQ());
-        } else {
-            m_members.emplace(nodep->name(), nodep);
-        }
-    }
-}
-void AstClass::repairCache() {
-    clearCache();
-    for (auto* itemp = membersp(); itemp; itemp = itemp->nextp()) {
-        if (const auto* const scopep = VN_CAST(itemp, Scope)) {
-            for (auto* blockp = scopep->blocksp(); blockp; blockp = blockp->nextp()) {
-                insertCache(blockp);
-            }
-        } else {
-            insertCache(itemp);
-        }
-    }
+bool AstClass::isCacheableChild(const AstNode* nodep) {
+    return (VN_IS(nodep, Var) || VN_IS(nodep, EnumItemRef)
+            || (VN_IS(nodep, NodeFTask) && !VN_AS(nodep, NodeFTask)->isExternProto())
+            || VN_IS(nodep, CFunc));
 }
 AstClass* AstClass::baseMostClassp() {
     AstClass* basep = this;
@@ -1545,10 +1577,24 @@ void AstEnumItemRef::dump(std::ostream& str) const {
         str << "UNLINKED";
     }
 }
+const char* AstEnumDType::broken() const {
+    BROKEN_RTN(!((m_refDTypep && !childDTypep() && m_refDTypep->brokeExists())
+                 || (!m_refDTypep && childDTypep())));
+    BROKEN_RTN(std::any_of(m_tableMap.begin(), m_tableMap.end(),
+                           [](const auto& p) { return !p.second->brokeExists(); }));
+    return nullptr;
+}
+
 const char* AstEnumItemRef::broken() const {
     BROKEN_RTN(m_itemp && !m_itemp->brokeExists());
     BROKEN_RTN(m_classOrPackagep && !m_classOrPackagep->brokeExists());
     return nullptr;
+}
+void AstEnumItemRef::cloneRelink() {
+    if (m_itemp->clonep()) m_itemp = m_itemp->clonep();
+    if (m_classOrPackagep && m_classOrPackagep->clonep()) {
+        m_classOrPackagep = m_classOrPackagep->clonep();
+    }
 }
 void AstIfaceRefDType::dump(std::ostream& str) const {
     this->AstNodeDType::dump(str);
@@ -1583,7 +1629,7 @@ void AstInitArray::dump(std::ostream& str) const {
             str << " ...";
             break;
         }
-        str << " [" << itr.first << "]=" << reinterpret_cast<const void*>(itr.second);
+        str << " [" << itr.first << "]=" << nodeAddr(itr.second);
     }
 }
 const char* AstInitArray::broken() const {
@@ -1599,13 +1645,13 @@ void AstInitArray::cloneRelink() {
     }
 }
 void AstInitArray::addIndexValuep(uint64_t index, AstNodeExpr* newp) {
-    const auto it = m_map.find(index);
-    if (it != m_map.end()) {
-        it->second->valuep(newp);
-    } else {
+    const auto pair = m_map.emplace(index, nullptr);
+    if (pair.second) {
         AstInitItem* const itemp = new AstInitItem{fileline(), newp};
-        m_map.emplace(index, itemp);
+        pair.first->second = itemp;
         addInitsp(itemp);
+    } else {
+        pair.first->second->valuep(newp);
     }
 }
 AstNodeExpr* AstInitArray::getIndexValuep(uint64_t index) const {
@@ -1647,10 +1693,6 @@ void AstJumpLabel::dump(std::ostream& str) const {
         str << "%Error:UNLINKED";
     }
 }
-void AstLogOr::dump(std::ostream& str) const {
-    this->AstNodeExpr::dump(str);
-    if (sideEffect()) str << " [SIDE]";
-}
 
 void AstMemberDType::dumpSmall(std::ostream& str) const {
     this->AstNodeDType::dumpSmall(str);
@@ -1662,6 +1704,12 @@ AstNodeUOrStructDType* AstMemberDType::getChildStructp() const {
         subdtp = asubdtp->subDTypep();
     }
     return VN_CAST(subdtp, NodeUOrStructDType);  // Maybe nullptr
+}
+
+bool AstMemberSel::same(const AstNode* samep) const {
+    const AstMemberSel* const sp = VN_DBG_AS(samep, MemberSel);
+    return sp != nullptr && access() == sp->access() && fromp()->isSame(sp->fromp())
+           && name() == sp->name() && varp()->same(sp->varp());
 }
 
 void AstMemberSel::dump(std::ostream& str) const {
@@ -1895,6 +1943,8 @@ const char* AstNetlist::broken() const {
     BROKEN_RTN(m_dpiExportTriggerp && !m_dpiExportTriggerp->brokeExists());
     BROKEN_RTN(m_topScopep && !m_topScopep->brokeExists());
     BROKEN_RTN(m_delaySchedulerp && !m_delaySchedulerp->brokeExists());
+    BROKEN_RTN(m_nbaEventp && !m_nbaEventp->brokeExists());
+    BROKEN_RTN(m_nbaEventTriggerp && !m_nbaEventTriggerp->brokeExists());
     return nullptr;
 }
 AstPackage* AstNetlist::dollarUnitPkgAddp() {
@@ -1993,7 +2043,7 @@ void AstTypeTable::dump(std::ostream& str) const {
 }
 void AstAssocArrayDType::dumpSmall(std::ostream& str) const {
     this->AstNodeDType::dumpSmall(str);
-    str << "[assoc-" << reinterpret_cast<const void*>(keyDTypep()) << "]";
+    str << "[assoc-" << nodeAddr(keyDTypep()) << "]";
 }
 string AstAssocArrayDType::prettyDTypeName() const {
     return subDTypep()->prettyDTypeName() + "[" + keyDTypep()->prettyDTypeName() + "]";
@@ -2017,13 +2067,14 @@ void AstWildcardArrayDType::dumpSmall(std::ostream& str) const {
     str << "[*]";
 }
 bool AstWildcardArrayDType::same(const AstNode* samep) const {
-    const AstNodeArrayDType* const asamep = static_cast<const AstNodeArrayDType*>(samep);
+    const AstWildcardArrayDType* const asamep = VN_DBG_AS(samep, WildcardArrayDType);
     if (!asamep->subDTypep()) return false;
     return (subDTypep() == asamep->subDTypep());
 }
 bool AstWildcardArrayDType::similarDType(const AstNodeDType* samep) const {
-    const AstNodeArrayDType* const asamep = static_cast<const AstNodeArrayDType*>(samep);
-    return type() == samep->type() && asamep->subDTypep()
+    if (type() != samep->type()) return false;
+    const AstWildcardArrayDType* const asamep = VN_DBG_AS(samep, WildcardArrayDType);
+    return asamep->subDTypep()
            && subDTypep()->skipRefp()->similarDType(asamep->subDTypep()->skipRefp());
 }
 void AstSampleQueueDType::dumpSmall(std::ostream& str) const {
@@ -2035,13 +2086,14 @@ void AstUnsizedArrayDType::dumpSmall(std::ostream& str) const {
     str << "[]";
 }
 bool AstUnsizedArrayDType::same(const AstNode* samep) const {
-    const AstNodeArrayDType* const asamep = static_cast<const AstNodeArrayDType*>(samep);
+    const AstUnsizedArrayDType* const asamep = VN_DBG_AS(samep, UnsizedArrayDType);
     if (!asamep->subDTypep()) return false;
     return (subDTypep() == asamep->subDTypep());
 }
 bool AstUnsizedArrayDType::similarDType(const AstNodeDType* samep) const {
-    const AstNodeArrayDType* const asamep = static_cast<const AstNodeArrayDType*>(samep);
-    return type() == samep->type() && asamep->subDTypep()
+    if (type() != samep->type()) return false;
+    const AstUnsizedArrayDType* const asamep = VN_DBG_AS(samep, UnsizedArrayDType);
+    return asamep->subDTypep()
            && subDTypep()->skipRefp()->similarDType(asamep->subDTypep()->skipRefp());
 }
 void AstEmptyQueueDType::dumpSmall(std::ostream& str) const {
@@ -2052,16 +2104,24 @@ void AstVoidDType::dumpSmall(std::ostream& str) const {
     this->AstNodeDType::dumpSmall(str);
     str << "void";
 }
+void AstStreamDType::dumpSmall(std::ostream& str) const {
+    this->AstNodeDType::dumpSmall(str);
+    str << "stream";
+}
 void AstVarScope::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     if (isTrace()) str << " [T]";
-    if (scopep()) str << " [scopep=" << reinterpret_cast<const void*>(scopep()) << "]";
+    if (scopep()) str << " [scopep=" << nodeAddr(scopep()) << "]";
     if (varp()) {
         str << " -> ";
         varp()->dump(str);
     } else {
         str << " ->UNLINKED";
     }
+}
+bool AstVarScope::same(const AstNode* samep) const {
+    const AstVarScope* const asamep = VN_DBG_AS(samep, VarScope);
+    return varp()->same(asamep->varp()) && scopep()->same(asamep->scopep());
 }
 void AstNodeVarRef::dump(std::ostream& str) const {
     this->AstNodeExpr::dump(str);
@@ -2090,9 +2150,11 @@ void AstVarRef::dump(std::ostream& str) const {
         str << "UNLINKED";
     }
 }
-bool AstVarRef::same(const AstNode* samep) const {
-    return same(static_cast<const AstVarRef*>(samep));
+const char* AstVarRef::broken() const {
+    BROKEN_RTN(!varp());
+    return AstNodeVarRef::broken();
 }
+bool AstVarRef::same(const AstNode* samep) const { return same(VN_DBG_AS(samep, VarRef)); }
 int AstVarRef::instrCount() const {
     // Account for the target of hard-coded method calls as just an address computation
     if (const AstCMethodHard* const callp = VN_CAST(backp(), CMethodHard)) {
@@ -2111,8 +2173,14 @@ void AstVar::dump(std::ostream& str) const {
     if (isPulldown()) str << " [PULLDOWN]";
     if (isUsedClock()) str << " [CLK]";
     if (isSigPublic()) str << " [P]";
+    if (isInternal()) str << " [INTERNAL]";
     if (isLatched()) str << " [LATCHED]";
     if (isUsedLoopIdx()) str << " [LOOP]";
+    if (isRandC()) {
+        str << " [RANDC]";
+    } else if (isRand()) {
+        str << " [RAND]";
+    }
     if (noReset()) str << " [!RST]";
     if (attrIsolateAssign()) str << " [aISO]";
     if (attrFileDescr()) str << " [aFD]";
@@ -2126,11 +2194,22 @@ void AstVar::dump(std::ostream& str) const {
     if (!lifetime().isNone()) str << " [" << lifetime().ascii() << "] ";
     str << " " << varType();
 }
+bool AstVar::same(const AstNode* samep) const {
+    const AstVar* const asamep = VN_DBG_AS(samep, Var);
+    return name() == asamep->name() && varType() == asamep->varType();
+}
 void AstScope::dump(std::ostream& str) const {
     this->AstNode::dump(str);
-    str << " [abovep=" << reinterpret_cast<const void*>(aboveScopep()) << "]";
-    str << " [cellp=" << reinterpret_cast<const void*>(aboveCellp()) << "]";
-    str << " [modp=" << reinterpret_cast<const void*>(modp()) << "]";
+    str << " [abovep=" << nodeAddr(aboveScopep()) << "]";
+    str << " [cellp=" << nodeAddr(aboveCellp()) << "]";
+    str << " [modp=" << nodeAddr(modp()) << "]";
+}
+bool AstScope::same(const AstNode* samep) const {
+    const AstScope* const asamep = VN_DBG_AS(samep, Scope);
+    return name() == asamep->name()
+           && ((!aboveScopep() && !asamep->aboveScopep())
+               || (aboveScopep() && asamep->aboveScopep()
+                   && aboveScopep()->name() == asamep->aboveScopep()->name()));
 }
 void AstScopeName::dump(std::ostream& str) const {
     this->AstNodeExpr::dump(str);
@@ -2214,6 +2293,31 @@ void AstNodeFTask::dump(std::ostream& str) const {
     if (taskPublic()) str << " [PUBLIC]";
     if ((dpiImport() || dpiExport()) && cname() != name()) str << " [c=" << cname() << "]";
 }
+bool AstNodeFTask::isPure() {
+    if (!m_purity.isCached()) m_purity.set(getPurityRecurse());
+    return m_purity.get();
+}
+const char* AstNodeFTask::broken() const {
+    BROKEN_RTN(m_purity.isCached() && m_purity.get() != getPurityRecurse());
+    return nullptr;
+}
+bool AstNodeFTask::getPurityRecurse() const {
+    if (this->dpiImport()) return this->dpiPure();
+    // Check the list of statements if it contains any impure statement
+    // or any write reference to a variable that isn't an automatic function local.
+    for (AstNode* stmtp = this->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+        if (const AstVar* const varp = VN_CAST(stmtp, Var)) {
+            if (varp->isInoutish() || varp->isRef()) return false;
+        }
+        if (!stmtp->isPure()) return false;
+        if (stmtp->exists([](const AstNodeVarRef* const varrefp) {
+                return (!varrefp->varp()->isFuncLocal() || varrefp->varp()->lifetime().isStatic())
+                       && varrefp->access().isWriteOrRW();
+            }))
+            return false;
+    }
+    return true;
+}
 void AstNodeBlock::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     if (unnamed()) str << " [UNNAMED]";
@@ -2223,6 +2327,7 @@ void AstBegin::dump(std::ostream& str) const {
     if (generate()) str << " [GEN]";
     if (genforp()) str << " [GENFOR]";
     if (implied()) str << " [IMPLIED]";
+    if (needProcess()) str << " [NPRC]";
 }
 void AstCoverDecl::dump(std::ostream& str) const {
     this->AstNodeStmt::dump(str);
@@ -2283,7 +2388,7 @@ void AstCFile::dump(std::ostream& str) const {
 void AstCFunc::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     if (slow()) str << " [SLOW]";
-    if (pure()) str << " [PURE]";
+    if (dpiPure()) str << " [DPIPURE]";
     if (isStatic()) str << " [STATIC]";
     if (dpiExportDispatcher()) str << " [DPIED]";
     if (dpiExportImpl()) str << " [DPIEI]";
@@ -2294,6 +2399,7 @@ void AstCFunc::dump(std::ostream& str) const {
     if (isDestructor()) str << " [DTOR]";
     if (isVirtual()) str << " [VIRT]";
     if (isCoroutine()) str << " [CORO]";
+    if (needProcess()) str << " [NPRC]";
 }
 const char* AstCAwait::broken() const {
     BROKEN_RTN(m_sensesp && !m_sensesp->brokeExists());
@@ -2312,7 +2418,7 @@ void AstCAwait::dump(std::ostream& str) const {
 int AstCMethodHard::instrCount() const {
     if (AstBasicDType* const basicp = fromp()->dtypep()->basicp()) {
         // TODO: add a more structured description of library methods, rather than using string
-        //       matching. See #3715.
+        //       matching. See issue #3715.
         if (basicp->isTriggerVec() && m_name == "word") {
             // This is an important special case for scheduling so we compute it precisely,
             // it is simply a load.
@@ -2320,6 +2426,75 @@ int AstCMethodHard::instrCount() const {
         }
     }
     return 0;
+}
+void AstCMethodHard::setPurity() {
+    static const std::map<std::string, bool> isPureMethod{{"andNot", false},
+                                                          {"any", true},
+                                                          {"anyTriggered", false},
+                                                          {"assign", false},
+                                                          {"at", true},
+                                                          {"atBack", true},
+                                                          {"awaitingCurrentTime", true},
+                                                          {"clear", false},
+                                                          {"clearFired", false},
+                                                          {"commit", false},
+                                                          {"delay", false},
+                                                          {"done", false},
+                                                          {"erase", false},
+                                                          {"evaluate", false},
+                                                          {"evaluation", false},
+                                                          {"exists", true},
+                                                          {"find", true},
+                                                          {"find_first", true},
+                                                          {"find_first_index", true},
+                                                          {"find_index", true},
+                                                          {"find_last", true},
+                                                          {"find_last_index", true},
+                                                          {"fire", false},
+                                                          {"first", false},
+                                                          {"init", false},
+                                                          {"insert", false},
+                                                          {"isFired", true},
+                                                          {"isTriggered", true},
+                                                          {"join", false},
+                                                          {"last", false},
+                                                          {"max", true},
+                                                          {"min", true},
+                                                          {"neq", true},
+                                                          {"next", false},
+                                                          {"pop", false},
+                                                          {"pop_back", false},
+                                                          {"pop_front", false},
+                                                          {"prev", false},
+                                                          {"push", false},
+                                                          {"push_back", false},
+                                                          {"push_front", false},
+                                                          {"r_and", true},
+                                                          {"r_or", true},
+                                                          {"r_product", true},
+                                                          {"r_sum", true},
+                                                          {"r_xor", true},
+                                                          {"renew", false},
+                                                          {"renew_copy", false},
+                                                          {"resume", false},
+                                                          {"reverse", false},
+                                                          {"rsort", false},
+                                                          {"set", false},
+                                                          {"shuffle", false},
+                                                          {"size", true},
+                                                          {"slice", true},
+                                                          {"sliceBackBack", true},
+                                                          {"sliceFrontBack", true},
+                                                          {"sort", false},
+                                                          {"thisOr", false},
+                                                          {"trigger", false},
+                                                          {"unique", true},
+                                                          {"unique_index", true},
+                                                          {"word", true}};
+
+    auto isPureIt = isPureMethod.find(name());
+    UASSERT_OBJ(isPureIt != isPureMethod.end(), this, "Unknown purity of method " + name());
+    m_pure = isPureIt->second;
 }
 const char* AstCFunc::broken() const {
     BROKEN_RTN((m_scopep && !m_scopep->brokeExists()));

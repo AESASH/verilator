@@ -26,14 +26,10 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
-#include "V3Ast.h"
 #include "V3Dfg.h"
 #include "V3DfgPasses.h"
-#include "V3Error.h"
-#include "V3Global.h"
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 
@@ -334,17 +330,20 @@ class AstToDfgVisitor final : public VNVisitor {
                     const uint32_t bEnd = b.m_lsb + bWidth;
                     const uint32_t overlapEnd = std::min(aEnd, bEnd) - 1;
 
-                    varp->varp()->v3warn(  //
-                        MULTIDRIVEN,
-                        "Bits ["  //
-                            << overlapEnd << ":" << b.m_lsb << "] of signal "
-                            << varp->varp()->prettyNameQ()
-                            << " have multiple combinational drivers\n"
-                            << a.m_fileline->warnOther() << "... Location of first driver\n"
-                            << a.m_fileline->warnContextPrimary() << '\n'
-                            << b.m_fileline->warnOther() << "... Location of other driver\n"
-                            << b.m_fileline->warnContextSecondary() << varp->varp()->warnOther()
-                            << "... Only the first driver will be respected");
+                    if (a.m_fileline->operatorCompare(*b.m_fileline) != 0) {
+                        varp->varp()->v3warn(  //
+                            MULTIDRIVEN,
+                            "Bits ["  //
+                                << overlapEnd << ":" << b.m_lsb << "] of signal "
+                                << varp->varp()->prettyNameQ()
+                                << " have multiple combinational drivers\n"
+                                << a.m_fileline->warnOther() << "... Location of first driver\n"
+                                << a.m_fileline->warnContextPrimary() << '\n'
+                                << b.m_fileline->warnOther() << "... Location of other driver\n"
+                                << b.m_fileline->warnContextSecondary()
+                                << varp->varp()->warnOther()
+                                << "... Only the first driver will be respected");
+                    }
 
                     // If the first driver completely covers the range of the second driver,
                     // we can just delete the second driver completely, otherwise adjust the

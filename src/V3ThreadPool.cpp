@@ -24,13 +24,16 @@
 constexpr unsigned int V3ThreadPool::FUTUREWAITFOR_MS;
 
 void V3ThreadPool::resize(unsigned n) VL_MT_UNSAFE VL_EXCLUDES(m_mutex)
-    VL_EXCLUDES(m_stoppedJobsMutex) {
+    VL_EXCLUDES(m_stoppedJobsMutex) VL_EXCLUDES(V3MtDisabledLock::instance()) {
+    // At least one thread (main)
+    n = std::max(1u, n);
+    if (n == (m_workers.size() + 1)) { return; }
     // This function is not thread-safe and can result in race between threads
     UASSERT(V3MutexConfig::s().lockConfig(),
             "Mutex config needs to be locked before starting ThreadPool");
     {
-        V3LockGuard lock{m_mutex};
         V3LockGuard stoppedJobsLock{m_stoppedJobsMutex};
+        V3LockGuard lock{m_mutex};
 
         UASSERT(m_queue.empty(), "Resizing busy thread pool");
         // Shut down old threads
@@ -38,6 +41,7 @@ void V3ThreadPool::resize(unsigned n) VL_MT_UNSAFE VL_EXCLUDES(m_mutex)
         m_stoppedJobs = 0;
         m_cv.notify_all();
         m_stoppedJobsCV.notify_all();
+        m_exclusiveAccessThreadCV.notify_all();
     }
     while (!m_workers.empty()) {
         m_workers.front().join();
@@ -53,6 +57,37 @@ void V3ThreadPool::resize(unsigned n) VL_MT_UNSAFE VL_EXCLUDES(m_mutex)
     }
 }
 
+void V3ThreadPool::suspendMultithreading() VL_MT_SAFE VL_EXCLUDES(m_mutex)
+    VL_EXCLUDES(m_stoppedJobsMutex) {
+    V3LockGuard stoppedJobsLock{m_stoppedJobsMutex};
+    if (!m_workers.empty()) { stopOtherThreads(); }
+
+    if (!m_mutex.try_lock()) {
+        v3fatal("Tried to suspend thread pool when other thread uses it.");
+    }
+    V3LockGuard lock{m_mutex, std::adopt_lock_t{}};
+
+    UASSERT(m_queue.empty(), "Thread pool has pending jobs");
+    UASSERT(m_jobsInProgress == 0, "Thread pool has jobs in progress");
+    m_exclusiveAccess = true;
+    m_multithreadingSuspended = true;
+}
+
+void V3ThreadPool::resumeMultithreading() VL_MT_SAFE VL_EXCLUDES(m_mutex)
+    VL_EXCLUDES(m_stoppedJobsMutex) {
+    if (!m_mutex.try_lock()) { v3fatal("Tried to resume thread pool when other thread uses it."); }
+    {
+        V3LockGuard lock{m_mutex, std::adopt_lock_t{}};
+        UASSERT(m_multithreadingSuspended, "Multithreading is not suspended");
+        m_multithreadingSuspended = false;
+        m_exclusiveAccess = false;
+    }
+    if (!m_workers.empty()) {
+        V3LockGuard stoppedJobsLock{m_stoppedJobsMutex};
+        resumeOtherThreads();
+    }
+}
+
 void V3ThreadPool::startWorker(V3ThreadPool* selfThreadp, int id) VL_MT_SAFE {
     selfThreadp->workerJobLoop(id);
 }
@@ -61,87 +96,59 @@ void V3ThreadPool::workerJobLoop(int id) VL_MT_SAFE {
     while (true) {
         // Wait for a notification
         waitIfStopRequested();
-        job_t job;
+        VAnyPackagedTask job;
         {
             V3LockGuard lock(m_mutex);
             m_cv.wait(m_mutex, [&]() VL_REQUIRES(m_mutex) {
                 return !m_queue.empty() || m_shutdown || m_stopRequested;
             });
             if (m_shutdown) return;  // Terminate if requested
-            if (stopRequestedStandalone()) { continue; }
+            if (stopRequested()) { continue; }
             // Get the job
             UASSERT(!m_queue.empty(), "Job should be available");
 
-            job = m_queue.front();
+            job = std::move(m_queue.front());
             m_queue.pop();
+            ++m_jobsInProgress;
         }
 
         // Execute the job
         job();
+        // Note that a context switch can happen here. This means `m_jobsInProgress` could still
+        // contain old value even after the job promise has been fulfilled.
+        --m_jobsInProgress;
     }
 }
 
-template <>
-void V3ThreadPool::pushJob<void>(std::shared_ptr<std::promise<void>>& prom,
-                                 std::function<void()>&& f) VL_MT_SAFE {
-    if (willExecuteSynchronously()) {
-        f();
-        prom->set_value();
-    } else {
-        const V3LockGuard lock{m_mutex};
-        m_queue.push([prom, f] {
-            f();
-            prom->set_value();
-        });
-    }
-}
-
-void V3ThreadPool::requestExclusiveAccess(const V3ThreadPool::job_t&& exclusiveAccessJob)
-    VL_MT_SAFE {
-    if (willExecuteSynchronously()) {
-        exclusiveAccessJob();
-    } else {
-        V3LockGuard stoppedJobLock{m_stoppedJobsMutex};
-        // if some other job already requested exclusive access
-        // wait until it stops
-        if (stopRequested()) { waitStopRequested(); }
-        m_stopRequested = true;
-        waitOtherThreads();
-        m_exclusiveAccess = true;
-        exclusiveAccessJob();
-        m_exclusiveAccess = false;
-        m_stopRequested = false;
-        m_stoppedJobsCV.notify_all();
-    }
-}
-
-bool V3ThreadPool::waitIfStopRequested() VL_MT_SAFE {
-    V3LockGuard stoppedJobLock(m_stoppedJobsMutex);
+bool V3ThreadPool::waitIfStopRequested() VL_MT_SAFE VL_EXCLUDES(m_stoppedJobsMutex) {
     if (!stopRequested()) return false;
-    waitStopRequested();
+    V3LockGuard stoppedJobLock(m_stoppedJobsMutex);
+    waitForResumeRequest();
     return true;
 }
 
-void V3ThreadPool::waitStopRequested() VL_REQUIRES(m_stoppedJobsMutex) {
+void V3ThreadPool::waitForResumeRequest() VL_REQUIRES(m_stoppedJobsMutex) {
     ++m_stoppedJobs;
-    m_stoppedJobsCV.notify_all();
-    m_stoppedJobsCV.wait(m_stoppedJobsMutex, [&]() VL_REQUIRES(m_stoppedJobsMutex) {
-        return !m_stopRequested.load();
-    });
+    m_exclusiveAccessThreadCV.notify_one();
+    m_stoppedJobsCV.wait(m_stoppedJobsMutex,
+                         [&]() VL_REQUIRES(m_stoppedJobsMutex) { return !m_stopRequested; });
     --m_stoppedJobs;
-    m_stoppedJobsCV.notify_all();
 }
 
-void V3ThreadPool::waitOtherThreads() VL_MT_SAFE_EXCLUDES(m_mutex)
+void V3ThreadPool::stopOtherThreads() VL_MT_SAFE_EXCLUDES(m_mutex)
     VL_REQUIRES(m_stoppedJobsMutex) {
-    ++m_stoppedJobs;
-    m_stoppedJobsCV.notify_all();
-    m_cv.notify_all();
-    m_stoppedJobsCV.wait(m_stoppedJobsMutex, [&]() VL_REQUIRES(m_stoppedJobsMutex) {
-        // count also the main thread
-        return m_stoppedJobs == (m_workers.size() + 1);
+    m_stopRequested = true;
+    {
+        V3LockGuard lock{m_mutex};
+        m_cv.notify_all();
+    }
+    m_exclusiveAccessThreadCV.wait(m_stoppedJobsMutex, [&]() VL_REQUIRES(m_stoppedJobsMutex) {
+        return m_stoppedJobs == m_workers.size();
     });
-    --m_stoppedJobs;
+}
+
+void V3ThreadPool::selfTestMtDisabled() {
+    // empty
 }
 
 void V3ThreadPool::selfTest() {
@@ -150,11 +157,10 @@ void V3ThreadPool::selfTest() {
 
     auto firstJob = [&](int sleep) -> void {
         std::this_thread::sleep_for(std::chrono::milliseconds{sleep});
-        s().requestExclusiveAccess([&]() {
-            commonValue = 10;
-            std::this_thread::sleep_for(std::chrono::milliseconds{sleep + 10});
-            UASSERT(commonValue == 10, "unexpected commonValue = " << commonValue);
-        });
+        const V3ThreadPool::ScopedExclusiveAccess exclusiveAccess;
+        commonValue = 10;
+        std::this_thread::sleep_for(std::chrono::milliseconds{sleep + 10});
+        UASSERT(commonValue == 10, "unexpected commonValue = " << commonValue);
     };
     auto secondJob = [&](int sleep) -> void {
         commonMutex.lock();
@@ -175,19 +181,19 @@ void V3ThreadPool::selfTest() {
     };
     std::list<std::future<void>> futures;
 
-    futures.push_back(s().enqueue<void>(std::bind(firstJob, 100)));
-    futures.push_back(s().enqueue<void>(std::bind(secondJob, 100)));
-    futures.push_back(s().enqueue<void>(std::bind(firstJob, 100)));
-    futures.push_back(s().enqueue<void>(std::bind(secondJob, 100)));
-    futures.push_back(s().enqueue<void>(std::bind(secondJob, 200)));
-    futures.push_back(s().enqueue<void>(std::bind(firstJob, 200)));
-    futures.push_back(s().enqueue<void>(std::bind(firstJob, 300)));
+    futures.push_back(s().enqueue(std::bind(firstJob, 100)));
+    futures.push_back(s().enqueue(std::bind(secondJob, 100)));
+    futures.push_back(s().enqueue(std::bind(firstJob, 100)));
+    futures.push_back(s().enqueue(std::bind(secondJob, 100)));
+    futures.push_back(s().enqueue(std::bind(secondJob, 200)));
+    futures.push_back(s().enqueue(std::bind(firstJob, 200)));
+    futures.push_back(s().enqueue(std::bind(firstJob, 300)));
     while (!futures.empty()) {
         s().waitForFuture(futures.front());
         futures.pop_front();
     }
-    futures.push_back(s().enqueue<void>(std::bind(thirdJob, 100)));
-    futures.push_back(s().enqueue<void>(std::bind(thirdJob, 100)));
+    futures.push_back(s().enqueue(std::bind(thirdJob, 100)));
+    futures.push_back(s().enqueue(std::bind(thirdJob, 100)));
     V3ThreadPool::waitForFutures(futures);
 
     s().waitIfStopRequested();
@@ -195,7 +201,31 @@ void V3ThreadPool::selfTest() {
 
     auto forthJob = [&]() -> int { return 1234; };
     std::list<std::future<int>> futuresInt;
-    futuresInt.push_back(s().enqueue<int>(forthJob));
+    futuresInt.push_back(s().enqueue(forthJob));
     auto result = V3ThreadPool::waitForFutures(futuresInt);
     UASSERT(result.back() == 1234, "unexpected future result = " << result.back());
+    {
+        const V3MtDisabledLockGuard mtDisabler{v3MtDisabledLock()};
+        selfTestMtDisabled();
+        {
+            V3LockGuard lock{V3ThreadPool::s().m_mutex};
+            UASSERT(V3ThreadPool::s().m_multithreadingSuspended,
+                    "Multithreading should be suspended at this point");
+        }
+    }
+    {
+        V3LockGuard lock{V3ThreadPool::s().m_mutex};
+        UASSERT(!V3ThreadPool::s().m_multithreadingSuspended,
+                "Multithreading should not be suspended at this point");
+    }
+}
+
+V3MtDisabledLock V3MtDisabledLock::s_mtDisabledLock;
+
+void V3MtDisabledLock::lock() VL_ACQUIRE() VL_MT_SAFE {
+    V3ThreadPool::s().suspendMultithreading();
+}
+
+void V3MtDisabledLock::unlock() VL_RELEASE() VL_MT_SAFE {
+    V3ThreadPool::s().resumeMultithreading();
 }

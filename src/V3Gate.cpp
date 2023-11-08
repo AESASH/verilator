@@ -21,20 +21,16 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3Gate.h"
 
-#include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3Const.h"
 #include "V3DupFinder.h"
-#include "V3Global.h"
 #include "V3Graph.h"
 #include "V3Stats.h"
 
-#include <algorithm>
 #include <list>
 #include <unordered_map>
 #include <unordered_set>
@@ -65,6 +61,7 @@ public:
 // Support classes
 
 class GateEitherVertex VL_NOT_FINAL : public V3GraphVertex {
+    VL_RTTI_IMPL(GateEitherVertex, V3GraphVertex)
     AstScope* const m_scopep;  // Scope vertex refers to
     bool m_reducible = true;  // True if this node should be able to be eliminated
     bool m_dedupable = true;  // True if this node should be able to be deduped
@@ -122,6 +119,7 @@ public:
 };
 
 class GateVarVertex final : public GateEitherVertex {
+    VL_RTTI_IMPL(GateVarVertex, GateEitherVertex)
     AstVarScope* const m_varScp;
     bool m_isTop = false;
     bool m_isClock = false;
@@ -164,6 +162,7 @@ public:
 };
 
 class GateLogicVertex final : public GateEitherVertex {
+    VL_RTTI_IMPL(GateLogicVertex, GateEitherVertex)
     AstNode* const m_nodep;
     AstActive* const m_activep;  // Under what active; nullptr is ok (under cfunc or such)
     const bool m_slow;  // In slow block
@@ -176,9 +175,7 @@ public:
         , m_slow{slow} {}
     ~GateLogicVertex() override = default;
     // ACCESSORS
-    string name() const override VL_MT_STABLE {
-        return (cvtToHex(m_nodep) + "@" + scopep()->prettyName());
-    }
+    string name() const override { return (cvtToHex(m_nodep) + "@" + scopep()->prettyName()); }
     string dotColor() const override { return "purple"; }
     FileLine* fileline() const override { return nodep()->fileline(); }
     AstNode* nodep() const { return m_nodep; }
@@ -333,7 +330,6 @@ private:
     AstActive* m_activep = nullptr;  // Current active
     bool m_activeReducible = true;  // Is activation block reducible?
     bool m_inSenItem = false;  // Underneath AstSenItem; any varrefs are clocks
-    bool m_inExprStmt = false;  // Underneath ExprStmt; don't optimize LHS vars
     bool m_inSlow = false;  // Inside a slow structure
     std::vector<AstNode*> m_optimized;  // Logic blocks optimized
 
@@ -376,6 +372,11 @@ private:
             UINFO(6, "New vertex " << varscp << endl);
             vertexp = new GateVarVertex{&m_graph, m_scopep, varscp};
             varscp->user1p(vertexp);
+            if (varscp->varp()->isUsedVirtIface()) {
+                // Can be used in a class method, which cannot be tracked statically
+                vertexp->clearReducibleAndDedupable("VirtIface");
+                vertexp->setConsumed("VirtIface");
+            }
             if (varscp->varp()->isSigPublic()) {
                 // Public signals shouldn't be changed, pli code might be messing with them
                 vertexp->clearReducibleAndDedupable("SigPublic");
@@ -395,7 +396,7 @@ private:
     void optimizeElimVar(AstVarScope* varscp, AstNode* substp, AstNode* consumerp) {
         if (debug() >= 5) consumerp->dumpTree("-    elimUsePre: ");
         if (!m_substitutions.tryGet(consumerp)) m_optimized.push_back(consumerp);
-        m_substitutions(consumerp).emplace(varscp, substp->cloneTree(false));
+        m_substitutions(consumerp).emplace(varscp, substp->cloneTreePure(false));
     }
 
     void commitElimVar(AstNode* logicp) {
@@ -499,10 +500,6 @@ private:
             // the weight will increase
             if (nodep->access().isWriteOrRW()) {
                 new V3GraphEdge{&m_graph, m_logicVertexp, vvertexp, 1};
-                if (m_inExprStmt) {
-                    m_logicVertexp->clearReducibleAndDedupable("LHS var in ExprStmt");
-                    m_logicVertexp->setConsumed("LHS var in ExprStmt");
-                }
             }
             if (nodep->access().isReadOrRW()) {
                 new V3GraphEdge{&m_graph, vvertexp, m_logicVertexp, 1};
@@ -518,11 +515,6 @@ private:
         iterateNewStmt(nodep, "User C Function", "User C Function");
     }
     void visit(AstClocking* nodep) override { iterateNewStmt(nodep, nullptr, nullptr); }
-    void visit(AstExprStmt* nodep) override {
-        VL_RESTORER(m_inExprStmt);
-        m_inExprStmt = true;
-        iterateChildren(nodep);
-    }
     void visit(AstSenItem* nodep) override {
         VL_RESTORER(m_inSenItem);
         m_inSenItem = true;
@@ -580,7 +572,7 @@ public:
 
 void GateVisitor::optimizeSignals(bool allowMultiIn) {
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        GateVarVertex* const vvertexp = dynamic_cast<GateVarVertex*>(itp);
+        GateVarVertex* const vvertexp = itp->cast<GateVarVertex>();
 
         // Consider "inlining" variables
         if (!vvertexp) continue;
@@ -722,7 +714,7 @@ void GateVisitor::consumedMove() {
     // We need the "usually" block logic to do a better job at this
     for (V3GraphVertex* vertexp = m_graph.verticesBeginp(); vertexp;
          vertexp = vertexp->verticesNextp()) {
-        if (const GateVarVertex* const vvertexp = dynamic_cast<GateVarVertex*>(vertexp)) {
+        if (const GateVarVertex* const vvertexp = vertexp->cast<GateVarVertex>()) {
             if (!vvertexp->consumed() && !vvertexp->user()) {
                 UINFO(8, "Unconsumed " << vvertexp->varScp() << endl);
             }
@@ -746,7 +738,7 @@ void GateVisitor::consumedMove() {
 void GateVisitor::warnSignals() {
     AstNode::user2ClearTree();
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        if (const GateVarVertex* const vvertexp = dynamic_cast<GateVarVertex*>(itp)) {
+        if (const GateVarVertex* const vvertexp = itp->cast<GateVarVertex>()) {
             const AstVarScope* const vscp = vvertexp->varScp();
             const AstNode* const sp = vvertexp->rstSyncNodep();
             const AstNode* const ap = vvertexp->rstAsyncNodep();
@@ -779,15 +771,22 @@ class GateDedupeHash final : public V3DupFinderUserSame {
 private:
     // NODE STATE
     // Ast*::user2p     -> parent AstNodeAssign* for this rhsp
-    // Ast*::user3p     -> AstActive* of assign, for isSame() in test for duplicate
-    //                     Set to nullptr if this assign's tree was later replaced
-    // Ast*::user5p     -> AstNode* of assign if condition, for isSame() in test for duplicate
-    //                     Set to nullptr if this assign's tree was later replaced
+    // AstNodeExpr::user3p -> see AuxAstNodeExpr via m_aux
     // VNUser1InUse    m_inuser1;      (Allocated for use in GateVisitor)
     // VNUser2InUse    m_inuser2;      (Allocated for use in GateVisitor)
     const VNUser3InUse m_inuser3;
     // VNUser4InUse    m_inuser4;      (Allocated for use in V3Hasher via V3DupFinder)
-    const VNUser5InUse m_inuser5;
+
+    struct AuxAstNodeExpr final {
+        // AstActive* of assign, for isSame() in test for duplicate. Set to nullptr if this
+        // assign's tree was later replaced
+        AstActive* activep = nullptr;
+        // AstNodeExpr* of assign if condition, for isSame() in test for duplicate. Set to nullptr
+        // if this assign's tree was later replaced
+        AstNodeExpr* condp = nullptr;
+    };
+
+    AstUser3Allocator<AstNodeExpr, AuxAstNodeExpr> m_auxNodeExpr;
 
     V3DupFinder m_dupFinder;  // Duplicate finder for rhs of assigns
     std::unordered_set<AstNode*> m_nodeDeleteds;  // Any node in this hash was deleted
@@ -827,41 +826,49 @@ public:
     // or could be a rhs variable in a tree we're not replacing (or not yet anyways)
     void hashReplace(AstNode* oldp, AstNode* newp) {
         UINFO(9, "replacing " << (void*)oldp << " with " << (void*)newp << endl);
-        // We could update the user3p and user5p but the resulting node
+        // We could update the activep and condp but the resulting node
         // still has incorrect hash.  We really need to remove all hash on
         // the whole hash entry tree involving the replaced node and
         // rehash.  That's complicated and this is rare, so just remove it
         // from consideration.
         m_nodeDeleteds.insert(oldp);
     }
-    bool isReplaced(AstNode* nodep) {
+    bool isReplaced(AstNodeExpr* nodep) {
         // Assignment may have been hashReplaced, if so consider non-match (effectively removed)
-        UASSERT_OBJ(!VN_IS(nodep, NodeAssign), nodep, "Dedup attempt on non-assign");
-        AstNode* const extra1p = nodep->user3p();
-        AstNode* const extra2p = nodep->user5p();
-        return ((extra1p && m_nodeDeleteds.find(extra1p) != m_nodeDeleteds.end())
-                || (extra2p && m_nodeDeleteds.find(extra2p) != m_nodeDeleteds.end()));
+        const auto& aux = m_auxNodeExpr(nodep);
+        AstActive* const activep = aux.activep;
+        AstNodeExpr* const condp = aux.condp;
+        return (activep && m_nodeDeleteds.count(activep))
+               || (condp && m_nodeDeleteds.count(condp));
     }
 
     // Callback from V3DupFinder::findDuplicate
     bool isSame(AstNode* node1p, AstNode* node2p) override {
+        AstNodeExpr* const expr1p = VN_AS(node1p, NodeExpr);
+        AstNodeExpr* const expr2p = VN_AS(node2p, NodeExpr);
+
         // Assignment may have been hashReplaced, if so consider non-match (effectively removed)
-        if (isReplaced(node1p) || isReplaced(node2p)) {
+        if (isReplaced(expr1p) || isReplaced(expr2p)) {
             // UINFO(9, "isSame hit on replaced "<<(void*)node1p<<" "<<(void*)node2p<<endl);
             return false;
         }
-        return same(node1p->user3p(), node2p->user3p()) && same(node1p->user5p(), node2p->user5p())
+
+        const auto& aux1 = m_auxNodeExpr(expr1p);
+        const auto& aux2 = m_auxNodeExpr(expr2p);
+
+        return same(aux1.activep, aux2.activep) && same(aux1.condp, aux2.condp)
                && node1p->user2p()->type() == node2p->user2p()->type();
     }
 
-    const AstNodeAssign* hashAndFindDupe(AstNodeAssign* assignp, AstNode* extra1p,
-                                         AstNode* extra2p) {
+    const AstNodeAssign* hashAndFindDupe(AstNodeAssign* assignp, AstActive* extra1p,
+                                         AstNodeExpr* extra2p) {
         // Legal for extra1p/2p to be nullptr, we'll compare with other assigns with extras also
         // nullptr
-        AstNode* const rhsp = assignp->rhsp();
+        AstNodeExpr* const rhsp = assignp->rhsp();
         rhsp->user2p(assignp);
-        rhsp->user3p(extra1p);
-        rhsp->user5p(extra2p);
+        auto& aux = m_auxNodeExpr(rhsp);
+        aux.activep = extra1p;
+        aux.condp = extra2p;
 
         const auto inserted = m_dupFinder.insert(rhsp);
         const auto dupit = m_dupFinder.findDuplicate(rhsp, this);
@@ -878,13 +885,14 @@ public:
 
     void check() {
         for (const auto& itr : m_dupFinder) {
-            AstNode* const nodep = itr.second;
-            const AstNode* const activep = nodep->user3p();
-            const AstNode* const condVarp = nodep->user5p();
+            AstNodeExpr* const nodep = VN_AS(itr.second, NodeExpr);
+            const auto& aux = m_auxNodeExpr(nodep);
+            const AstActive* const activep = aux.activep;
+            const AstNodeExpr* const condVarp = aux.condp;
             if (!isReplaced(nodep)) {
                 // This class won't break if activep isn't an active, or
                 // ifVar isn't a var, but this is checking the caller's construction.
-                UASSERT_OBJ(!activep || (!VN_DELETED(activep) && VN_IS(activep, Active)), nodep,
+                UASSERT_OBJ(!activep || (!VN_DELETED(activep)), nodep,
                             "V3DupFinder check failed, lost active pointer");
                 UASSERT_OBJ(!condVarp || !VN_DELETED(condVarp), nodep,
                             "V3DupFinder check failed, lost if pointer");
@@ -907,11 +915,12 @@ class GateDedupeVarVisitor final : public VNVisitor {
     //   (Note, the IF must be the only node under the always,
     //    and the assign must be the only node under the if, other than the ifcond)
     // Any other ordering or node type, except for an AstComment, makes it not dedupable
+    // AstExprStmt in the subtree of a node also makes the node not dedupable.
 private:
     // STATE
     GateDedupeHash m_ghash;  // Hash used to find dupes of rhs of assign
     AstNodeAssign* m_assignp = nullptr;  // Assign found for dedupe
-    AstNode* m_ifCondp = nullptr;  // IF condition that assign is under
+    AstNodeExpr* m_ifCondp = nullptr;  // IF condition that assign is under
     bool m_always = false;  // Assign is under an always
     bool m_dedupable = true;  // Determined the assign to be dedupable
 
@@ -922,6 +931,7 @@ private:
             // non-blocking statements, but erring on side of caution here
             if (!m_assignp) {
                 m_assignp = assignp;
+                m_dedupable = !assignp->exists([&](AstExprStmt*) { return true; });
             } else {
                 m_dedupable = false;
             }
@@ -946,6 +956,7 @@ private:
             if (m_always && !m_ifCondp && !ifp->elsesp()) {
                 // we're under an always, this is the first IF, and there's no else
                 m_ifCondp = ifp->condp();
+                m_dedupable = !m_ifCondp->exists([&](AstExprStmt*) { return true; });
                 iterateAndNextNull(ifp->thensp());
             } else {
                 m_dedupable = false;
@@ -1010,11 +1021,11 @@ static void eliminate(AstNode* logicp,
         // Substitute in the new tree
         UASSERT_OBJ(nodep->access().isReadOnly(), nodep,
                     "Can't replace lvalue assignments with const var");
-        UASSERT_OBJ(!(VN_IS(substp, NodeVarRef) && nodep->same(substp)),
+        UASSERT_OBJ(!(VN_IS(substp, NodeVarRef) && nodep->isSame(substp)),
                     // Prevent an infinite loop...
                     substp, "Replacing node with itself; perhaps circular logic?");
         // The replacement
-        AstNode* const newp = substp->cloneTree(false);
+        AstNode* const newp = substp->cloneTreePure(false);
         // Which fileline() to use? If replacing with logic, an error/warning is likely to want
         // to point to the logic IE what we're replacing with. However, a VARREF should point
         // to the original as it's otherwise confusing to throw warnings that point to a PIN
@@ -1145,14 +1156,14 @@ void GateVisitor::dedupe() {
     // Traverse starting from each of the clocks
     UINFO(9, "Gate dedupe() clocks:\n");
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        if (GateVarVertex* const vvertexp = dynamic_cast<GateVarVertex*>(itp)) {
+        if (GateVarVertex* const vvertexp = itp->cast<GateVarVertex>()) {
             if (vvertexp->isClock()) deduper.dedupeTree(vvertexp);
         }
     }
     // Traverse starting from each of the outputs
     UINFO(9, "Gate dedupe() outputs:\n");
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        if (GateVarVertex* const vvertexp = dynamic_cast<GateVarVertex*>(itp)) {
+        if (GateVarVertex* const vvertexp = itp->cast<GateVarVertex>()) {
             if (vvertexp->isTop() && vvertexp->varScp()->varp()->isWritable()) {
                 deduper.dedupeTree(vvertexp);
             }
@@ -1196,8 +1207,7 @@ private:
         for (V3GraphEdge* edgep = vvertexp->inBeginp(); edgep;) {
             V3GraphEdge* oldedgep = edgep;
             edgep = edgep->inNextp();  // for recursive since the edge could be deleted
-            if (GateLogicVertex* const lvertexp
-                = dynamic_cast<GateLogicVertex*>(oldedgep->fromp())) {
+            if (GateLogicVertex* const lvertexp = oldedgep->fromp()->cast<GateLogicVertex>()) {
                 if (AstNodeAssign* const assignp = VN_CAST(lvertexp->nodep(), NodeAssign)) {
                     // if (lvertexp->outSize1() && VN_IS(assignp->lhsp(), Sel)) {
                     if (VN_IS(assignp->lhsp(), Sel) && lvertexp->outSize1()) {
@@ -1226,9 +1236,10 @@ private:
                             preselp->replaceWith(newselp);
                             VL_DO_DANGLING(preselp->deleteTree(), preselp);
                             // create new rhs for pre assignment
-                            AstNode* const newrhsp = new AstConcat{
-                                m_assignp->rhsp()->fileline(), m_assignp->rhsp()->cloneTree(false),
-                                assignp->rhsp()->cloneTree(false)};
+                            AstNode* const newrhsp
+                                = new AstConcat{m_assignp->rhsp()->fileline(),
+                                                m_assignp->rhsp()->cloneTreePure(false),
+                                                assignp->rhsp()->cloneTreePure(false)};
                             AstNode* const oldrhsp = m_assignp->rhsp();
                             oldrhsp->replaceWith(newrhsp);
                             VL_DO_DANGLING(oldrhsp->deleteTree(), oldrhsp);
@@ -1283,7 +1294,7 @@ void GateVisitor::mergeAssigns() {
     UINFO(6, "mergeAssigns\n");
     GateMergeAssignsGraphVisitor merger{&m_graph};
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        if (GateVarVertex* const vvertexp = dynamic_cast<GateVarVertex*>(itp)) {
+        if (GateVarVertex* const vvertexp = itp->cast<GateVarVertex>()) {
             merger.mergeAssignsTree(vvertexp);
         }
     }
@@ -1469,7 +1480,7 @@ void GateVisitor::decomposeClkVectors() {
     AstNode::user2ClearTree();
     GateClkDecompGraphVisitor decomposer{&m_graph};
     for (V3GraphVertex* itp = m_graph.verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        if (GateVarVertex* const vertp = dynamic_cast<GateVarVertex*>(itp)) {
+        if (GateVarVertex* const vertp = itp->cast<GateVarVertex>()) {
             const AstVarScope* const vsp = vertp->varScp();
             if (vsp->varp()->attrClocker() == VVarAttrClocker::CLOCKER_YES) {
                 if (vsp->varp()->width() > 1) {

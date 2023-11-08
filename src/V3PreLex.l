@@ -125,7 +125,7 @@ bom             [\357\273\277]
                           int res;
                           char enctype[16]; // long enough to hold "quote-printable"
                           if (LEXP->m_protBytes > 0) {
-                              LEXP->curFilelinep()->v3warn(BADSTDPRAGMA, "multiple `pragma protected encoding sections");
+                              LEXP->curFilelinep()->v3warn(BADSTDPRAGMA, "Multiple `pragma protected encoding sections");
                           }
                           res = sscanf(yytext + std::strlen("encoding"), " = (enctype = \"%15[A-Za-z0-9]\", line_length = %d, bytes = %d)", &enctype[0], &LEXP->m_protLength, &LEXP->m_protBytes);
                           if (res == 0)
@@ -501,11 +501,11 @@ size_t V3PreLex::inputToLex(char* buf, size_t max_size) {
     // become a stale invalid pointer.
     //
     VPreStream* streamp = curStreamp();
-    if (debug() >= 10) {
+    if (debug() >= 10) {  // LCOV_EXCL_START
         cout << "-  pp:inputToLex ITL s=" << max_size << " bs=" << streamp->m_buffers.size()
              << endl;
         dumpStack();
-    }
+    }  // LCOV_EXCL_STOP
     // For testing, use really small chunks
     // if (max_size > 13) max_size=13;
 again:
@@ -583,7 +583,7 @@ string V3PreLex::endOfStream(bool& againr) {
     } else if (curStreamp()->m_termState == 2) {
         // Now ending `line
         curStreamp()->m_termState = 3;
-        return curFilelinep()->lineDirectiveStrg(2);  // Exit old file
+        return curFilelinep()->lineDirectiveStrg(0);  // THe "2" exit is below
     } else {
         // Final shutdown phase for a stream, we can finally change the
         // current fileline to the new stream
@@ -603,7 +603,7 @@ string V3PreLex::endOfStream(bool& againr) {
         if (curStreamp()->m_eof) {
             return "";
         } else {
-            return curFilelinep()->lineDirectiveStrg(0);  // Reenter resumed file
+            return curFilelinep()->lineDirectiveStrg(2);  // Reenter resumed file
         }
     }
 }
@@ -696,16 +696,16 @@ void V3PreLex::warnBackslashSpace() {
         BSSPACE, "Backslash followed by whitespace, perhaps the whitespace is accidental?");
 }
 
-void V3PreLex::dumpSummary() {
+void V3PreLex::dumpSummary() {  // LCOV_EXCL_START
     cout << "-  pp::dumpSummary  curBuf=" << cvtToHex(currentBuffer());
 #ifdef FLEX_DEBUG  // Else peeking at internals may cause portability issues
     ssize_t left = (yy_n_chars - (yy_c_buf_p - currentBuffer()->yy_ch_buf));
     cout << " left=" << std::dec << left;
 #endif
     cout << endl;
-}
+}  // LCOV_EXCL_STOP
 
-void V3PreLex::dumpStack() {
+void V3PreLex::dumpStack() {  // LCOV_EXCL_START
     // For debug use
     dumpSummary();
     std::stack<VPreStream*> tmpstack = LEXP->m_streampStack;
@@ -717,7 +717,7 @@ void V3PreLex::dumpStack() {
              << (streamp->m_eof ? " [EOF]" : "") << (streamp->m_file ? " [FILE]" : "") << endl;
         tmpstack.pop();
     }
-}
+}  // LCOV_EXCL_STOP
 
 string V3PreLex::cleanDbgStrg(const string& in) {
     string result = in;

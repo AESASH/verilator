@@ -35,11 +35,13 @@ Briquet
 Brownlee
 Buckenmaier
 Bybell
+CLang
 CMake
 Cai
 Cavium
 Cfuncs
 Chandan
+Chih
 Chitlesh
 Christophe
 Cochrane
@@ -56,6 +58,7 @@ Das
 Dcache
 Deadman
 Debacker
+Deepa
 Defparams
 Denio
 Deprecations
@@ -88,6 +91,7 @@ Engstrom
 Enzo
 Eugen
 Fabrizio
+Faucher
 Fekete
 Ferrandi
 Flachs
@@ -213,6 +217,7 @@ Maupin
 Mdir
 Mednick
 Menküc
+Michail
 Michiels
 Microsystems
 Milanovic
@@ -228,6 +233,7 @@ Mong
 Muhlestein
 Multithreaded
 Multithreading
+Mykyta
 NOUNOPTFLAT
 NaN
 Nalbantis
@@ -246,6 +252,7 @@ Olof
 Olofsson
 Oyvind
 PLI
+Palaniappan
 Patricio
 Petr
 Piechotka
@@ -261,6 +268,7 @@ Pre
 Preprocess
 Pretet
 Pretl
+Pringlemeir
 Priyadharshini
 Pullup
 Pulver
@@ -275,6 +283,7 @@ Renga
 Requin
 Rodionov
 Rolfe
+Rontionov
 Roodselaar
 Runtime
 Ruud
@@ -376,6 +385,7 @@ Wfuture
 Whatson
 Wildman
 Wim
+Wmisleading
 Wno
 Wojciech
 Wolfel
@@ -410,7 +420,9 @@ architected
 args
 arrarys
 assertOn
+astgen
 async
+atClone
 ato
 atoi
 autoconf
@@ -478,6 +490,7 @@ countbits
 countones
 cout
 cpp
+cppstyle
 cpu
 ctor
 ctrace
@@ -512,6 +525,7 @@ doxygen
 dpiGetContext
 dpic
 dsvf
+dt
 dtor
 dumpall
 dumpfile
@@ -649,6 +663,7 @@ ish
 isunbounded
 isunknown
 jobserver
+jwoutersymatra
 killua
 lang
 lcov
@@ -712,6 +727,7 @@ multithreading
 musl
 mutexes
 mux
+muzafferkal
 myftptoyman
 mysignal
 namespace
@@ -750,6 +766,7 @@ pdf
 perf
 perftools
 pgo
+phelter
 picoChip
 pinIndex
 pinout
@@ -767,7 +784,9 @@ pragma
 pragmas
 pre
 precisions
+precompiled
 predefines
+prepareClone
 prepend
 prepended
 preprocess
@@ -795,6 +814,7 @@ radix
 randc
 randcase
 randstate
+raphmaster
 rarr
 rdtsc
 reStructuredText
@@ -804,6 +824,7 @@ readmemb
 readmemh
 realpath
 realtime
+realtobits
 recoding
 recrem
 redeclaring
@@ -905,6 +926,7 @@ undef
 undefineall
 undriven
 ungetc
+unhandled
 uniquified
 unistd
 unlink
@@ -925,7 +947,9 @@ vc
 vcd
 vcddiff
 vcoverage
+vdhotre
 vec
+ventana
 ver
 verFiles
 verible
@@ -971,4 +995,3 @@ ypq
 yurivict
 zdave
 Øyvind
-

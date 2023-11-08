@@ -82,12 +82,36 @@ using MTaskIdSet = std::set<int>;  // Set of mtaskIds for Var sorting
 // Ast<nodetypename>*' is returned.
 #define VN_AS(nodep, nodetypename) (AstNode::privateAs<Ast##nodetypename, decltype(nodep)>(nodep))
 
+// Same as VN_AS, but only checks the type in debug builds. Type checking is less critical in node
+// child getters (the strongly-typed functions that wrap op*p pointers). This is because the op*p
+// pointers are usually populated by code that already asserts the correct type. Having fewer type
+// assertions yields better performance in release builds.
+#ifdef VL_DEBUG
+#define VN_DBG_AS(nodep, nodetypename) VN_AS(nodep, nodetypename)
+#else
+#define VN_DBG_AS(nodep, nodetypename) \
+    (AstNode::unsafePrivateAs<Ast##nodetypename, decltype(nodep)>(nodep))
+#endif
+
 // (V)erilator (N)ode deleted: Pointer to deleted AstNode (for assertions only)
 #define VN_DELETED(nodep) VL_UNLIKELY((uint64_t)(nodep) == 0x1)
 
 //######################################################################
 
+struct VNTypeInfo {
+    const char* m_namep;
+    enum uint8_t {
+        OP_UNUSED,
+        OP_USED,
+        OP_LIST,
+        OP_OPTIONAL,
+    } m_opType[4];
+    const char* m_opNamep[4];
+};
+
 class VNType final {
+    static const VNTypeInfo typeInfoTable[];
+
 public:
 #include "V3Ast__gen_type_enum.h"  // From ./astgen
     // Above include has:
@@ -100,6 +124,7 @@ public:
     constexpr VNType(en _e) VL_MT_SAFE : m_e{_e} {}
     explicit VNType(int _e)
         : m_e(static_cast<en>(_e)) {}  // Need () or GCC 4.8 false warning
+    const VNTypeInfo* typeInfo() const VL_MT_SAFE { return &typeInfoTable[m_e]; }
     constexpr operator en() const VL_MT_SAFE { return m_e; }
 };
 constexpr bool operator==(const VNType& lhs, const VNType& rhs) VL_PURE {
@@ -139,6 +164,37 @@ constexpr bool operator==(VLifetime::en lhs, const VLifetime& rhs) { return lhs 
 inline std::ostream& operator<<(std::ostream& os, const VLifetime& rhs) {
     return os << rhs.ascii();
 }
+
+// ######################################################################
+
+class VIsCached final {
+    // Used in some nodes to cache results of boolean methods
+    // If cachedCnt == 0, not cached
+    // else if cachedCnt == s_cachedCntGbl, then m_state is if cached
+    uint64_t m_cachedCnt : 63;  // Mark of when cache was computed
+    uint64_t m_state : 1;
+    static uint64_t s_cachedCntGbl;  // Global computed count
+
+public:
+    VIsCached()
+        : m_cachedCnt{0}
+        , m_state{0} {}
+    bool isCached() const { return m_cachedCnt == s_cachedCntGbl; }
+    bool get() const { return m_state; }
+    void set(bool flag) {
+        m_cachedCnt = s_cachedCntGbl;
+        m_state = flag;
+    }
+    void clearCache() {
+        m_cachedCnt = 0;
+        m_state = 0;
+    }
+    static void clearCacheTree() {
+        ++s_cachedCntGbl;
+        // 64 bits so won't overflow
+        // UASSERT_STATIC(s_cachedCntGbl < MAX_CNT, "Overflow of cache counting");
+    }
+};
 
 // ######################################################################
 
@@ -268,7 +324,7 @@ public:
         ET_BOTHEDGE,  // POSEDGE | NEGEDGE (i.e.: 'edge' in Verilog)
         ET_POSEDGE,
         ET_NEGEDGE,
-        ET_EVENT,  // VlEvent::isFired
+        ET_EVENT,  // VlEventBase::isFired
         // Involving an expression
         ET_TRUE,
         //
@@ -461,6 +517,7 @@ public:
         TRIGGER_SCHEDULER,
         DYNAMIC_TRIGGER_SCHEDULER,
         FORK_SYNC,
+        PROCESS_REFERENCE,
         // Unsigned and two state; fundamental types
         UINT32,
         UINT64,
@@ -493,6 +550,7 @@ public:
                                             "VlTriggerScheduler",
                                             "VlDynamicTriggerScheduler",
                                             "VlFork",
+                                            "VlProcessRef",
                                             "IData",
                                             "QData",
                                             "LOGIC_IMPLICIT",
@@ -500,13 +558,20 @@ public:
         return names[m_e];
     }
     const char* dpiType() const {
-        static const char* const names[]
-            = {"%E-unk",       "svBit",         "char",          "void*",        "char",
-               "int",          "%E-integer",    "svLogic",       "long long",    "double",
-               "short",        "%E-time",       "const char*",   "%E-untyped",   "dpiScope",
-               "const char*",  "%E-mtaskstate", "%E-triggervec", "%E-dly-sched", "%E-trig-sched",
-               "%E-dyn-sched", "%E-fork",       "IData",         "QData",        "%E-logic-implct",
-               " MAX"};
+        static const char* const names[] = {"%E-unk",        "svBit",
+                                            "char",          "void*",
+                                            "char",          "int",
+                                            "%E-integer",    "svLogic",
+                                            "long long",     "double",
+                                            "short",         "%E-time",
+                                            "const char*",   "%E-untyped",
+                                            "dpiScope",      "const char*",
+                                            "%E-mtaskstate", "%E-triggervec",
+                                            "%E-dly-sched",  "%E-trig-sched",
+                                            "%E-dyn-sched",  "%E-fork",
+                                            "%E-proc-ref",   "IData",
+                                            "QData",         "%E-logic-implct",
+                                            " MAX"};
         return names[m_e];
     }
     static void selfTest() {
@@ -545,6 +610,7 @@ public:
         case TRIGGER_SCHEDULER: return 0;  // opaque
         case DYNAMIC_TRIGGER_SCHEDULER: return 0;  // opaque
         case FORK_SYNC: return 0;  // opaque
+        case PROCESS_REFERENCE: return 0;  // opaque
         case UINT32: return 32;
         case UINT64: return 64;
         default: return 0;
@@ -584,7 +650,7 @@ public:
         return (m_e == EVENT || m_e == STRING || m_e == SCOPEPTR || m_e == CHARPTR
                 || m_e == MTASKSTATE || m_e == TRIGGERVEC || m_e == DELAY_SCHEDULER
                 || m_e == TRIGGER_SCHEDULER || m_e == DYNAMIC_TRIGGER_SCHEDULER || m_e == FORK_SYNC
-                || m_e == DOUBLE || m_e == UNTYPED);
+                || m_e == PROCESS_REFERENCE || m_e == DOUBLE || m_e == UNTYPED);
     }
     bool isDouble() const VL_MT_SAFE { return m_e == DOUBLE; }
     bool isEvent() const { return m_e == EVENT; }
@@ -608,6 +674,39 @@ public:
         case UINT64: return true;
         default: return false;
         }
+    }
+
+    const char* traceSigType() const {
+        // VerilatedTraceSigType to used in trace signal declaration
+        static const char* const lut[] = {
+            /* UNKNOWN:                   */ "",  // Should not be traced
+            /* BIT:                       */ "BIT",
+            /* BYTE:                      */ "BYTE",
+            /* CHANDLE:                   */ "",
+            /* EVENT:                     */ "EVENT",
+            /* INT:                       */ "INT",
+            /* INTEGER:                   */ "INTEGER",
+            /* LOGIC:                     */ "LOGIC",
+            /* LONGINT:                   */ "LONGINT",
+            /* DOUBLE:                    */ "DOUBLE",
+            /* SHORTINT:                  */ "SHORTINT",
+            /* TIME:                      */ "TIME",
+            /* STRING:                    */ "",
+            /* UNTYPED:                   */ "",  // Should not be traced
+            /* SCOPEPTR:                  */ "",  // Should not be traced
+            /* CHARPTR:                   */ "",  // Should not be traced
+            /* MTASKSTATE:                */ "",  // Should not be traced
+            /* TRIGGERVEC:                */ "",  // Should not be traced
+            /* DELAY_SCHEDULER:           */ "",  // Should not be traced
+            /* TRIGGER_SCHEDULER:         */ "",  // Should not be traced
+            /* DYNAMIC_TRIGGER_SCHEDULER: */ "",  // Should not be traced
+            /* FORK_SYNC:                 */ "",  // Should not be traced
+            /* PROCESS_REFERENCE:         */ "",  // Should not be traced
+            /* UINT32:                    */ "BIT",
+            /* UINT64:                    */ "BIT",
+            /* LOGIC_IMPLICIT:            */ "",  // Should not be traced
+        };
+        return lut[m_e];
     }
 };
 constexpr bool operator==(const VBasicDTypeKwd& lhs, const VBasicDTypeKwd& rhs) VL_MT_SAFE {
@@ -655,13 +754,18 @@ public:
     }
     bool isReadOnly() const VL_MT_SAFE { return m_e == INPUT || m_e == CONSTREF; }
     bool isWritable() const VL_MT_SAFE { return m_e == OUTPUT || m_e == INOUT || m_e == REF; }
-    bool isRefOrConstRef() const VL_MT_SAFE { return m_e == REF || m_e == CONSTREF; }
+    bool isRef() const VL_MT_SAFE { return m_e == REF; }
+    bool isConstRef() const VL_MT_SAFE { return m_e == CONSTREF; }
 };
-constexpr bool operator==(const VDirection& lhs, const VDirection& rhs) {
+constexpr bool operator==(const VDirection& lhs, const VDirection& rhs) VL_MT_SAFE {
     return lhs.m_e == rhs.m_e;
 }
-constexpr bool operator==(const VDirection& lhs, VDirection::en rhs) { return lhs.m_e == rhs; }
-constexpr bool operator==(VDirection::en lhs, const VDirection& rhs) { return lhs == rhs.m_e; }
+constexpr bool operator==(const VDirection& lhs, VDirection::en rhs) VL_MT_SAFE {
+    return lhs.m_e == rhs;
+}
+constexpr bool operator==(VDirection::en lhs, const VDirection& rhs) VL_MT_SAFE {
+    return lhs == rhs.m_e;
+}
 inline std::ostream& operator<<(std::ostream& os, const VDirection& rhs) {
     return os << rhs.ascii();
 }
@@ -755,7 +859,6 @@ public:
         SUPPLY1,
         WIRE,
         WREAL,
-        IMPLICITWIRE,
         TRIWIRE,
         TRI0,
         TRI1,
@@ -775,25 +878,25 @@ public:
         : m_e(static_cast<en>(_e)) {}  // Need () or GCC 4.8 false warning
     constexpr operator en() const { return m_e; }
     const char* ascii() const {
-        static const char* const names[] = {
-            "?",         "GPARAM",     "LPARAM",       "GENVAR",  "VAR",      "SUPPLY0", "SUPPLY1",
-            "WIRE",      "WREAL",      "IMPLICITWIRE", "TRIWIRE", "TRI0",     "TRI1",    "PORT",
-            "BLOCKTEMP", "MODULETEMP", "STMTTEMP",     "XTEMP",   "IFACEREF", "MEMBER"};
+        static const char* const names[]
+            = {"?",          "GPARAM",   "LPARAM",  "GENVAR",   "VAR",   "SUPPLY0", "SUPPLY1",
+               "WIRE",       "WREAL",    "TRIWIRE", "TRI0",     "TRI1",  "PORT",    "BLOCKTEMP",
+               "MODULETEMP", "STMTTEMP", "XTEMP",   "IFACEREF", "MEMBER"};
         return names[m_e];
     }
+    bool isParam() const { return m_e == GPARAM || m_e == LPARAM; }
     bool isSignal() const {
-        return (m_e == WIRE || m_e == WREAL || m_e == IMPLICITWIRE || m_e == TRIWIRE || m_e == TRI0
-                || m_e == TRI1 || m_e == PORT || m_e == SUPPLY0 || m_e == SUPPLY1 || m_e == VAR);
+        return (m_e == WIRE || m_e == WREAL || m_e == TRIWIRE || m_e == TRI0 || m_e == TRI1
+                || m_e == PORT || m_e == SUPPLY0 || m_e == SUPPLY1 || m_e == VAR);
     }
     bool isNet() const {
-        return (m_e == WIRE || m_e == IMPLICITWIRE || m_e == TRIWIRE || m_e == TRI0 || m_e == TRI1
-                || m_e == SUPPLY0 || m_e == SUPPLY1);
+        return (m_e == WIRE || m_e == TRIWIRE || m_e == TRI0 || m_e == TRI1 || m_e == SUPPLY0
+                || m_e == SUPPLY1);
     }
     bool isContAssignable() const {  // In Verilog, always ok in SystemVerilog
-        return (m_e == SUPPLY0 || m_e == SUPPLY1 || m_e == WIRE || m_e == WREAL
-                || m_e == IMPLICITWIRE || m_e == TRIWIRE || m_e == TRI0 || m_e == TRI1
-                || m_e == PORT || m_e == BLOCKTEMP || m_e == MODULETEMP || m_e == STMTTEMP
-                || m_e == XTEMP || m_e == IFACEREF);
+        return (m_e == SUPPLY0 || m_e == SUPPLY1 || m_e == WIRE || m_e == WREAL || m_e == TRIWIRE
+                || m_e == TRI0 || m_e == TRI1 || m_e == PORT || m_e == BLOCKTEMP
+                || m_e == MODULETEMP || m_e == STMTTEMP || m_e == XTEMP || m_e == IFACEREF);
     }
     bool isProcAssignable() const {
         return (m_e == GPARAM || m_e == LPARAM || m_e == GENVAR || m_e == VAR || m_e == BLOCKTEMP
@@ -806,6 +909,32 @@ public:
     bool isVPIAccessible() const {
         return (m_e == VAR || m_e == GPARAM || m_e == LPARAM || m_e == PORT || m_e == WIRE
                 || m_e == TRI0 || m_e == TRI1);
+    }
+
+    const char* traceSigKind() const {
+        // VerilatedTraceSigKind to used in trace signal declaration
+        static const char* const lut[] = {
+            /* UNKNOWN:      */ "",  // Should not be traced
+            /* GPARAM:       */ "PARAMETER",
+            /* LPARAM:       */ "PARAMETER",
+            /* GENVAR:       */ "PARAMETER",
+            /* VAR:          */ "VAR",
+            /* SUPPLY0:      */ "SUPPLY0",
+            /* SUPPLY1:      */ "SUPPLY1",
+            /* WIRE:         */ "WIRE",
+            /* WREAL:        */ "WIRE",
+            /* TRIWIRE:      */ "TRI",
+            /* TRI0:         */ "TRI0",
+            /* TRI1:         */ "TRI1",
+            /* PORT:         */ "WIRE",
+            /* BLOCKTEMP:    */ "VAR",
+            /* MODULETEMP:   */ "VAR",
+            /* STMTTEMP:     */ "VAR",
+            /* XTEMP:        */ "VAR",
+            /* IFACEREF:     */ "",  // Should not be traced directly
+            /* MEMBER:       */ "VAR",
+        };
+        return lut[m_e];
     }
 };
 constexpr bool operator==(const VVarType& lhs, const VVarType& rhs) VL_MT_SAFE {
@@ -1147,31 +1276,145 @@ inline std::ostream& operator<<(std::ostream& os, const VNumRange& rhs) {
 class VUseType final {
 public:
     enum en : uint8_t {
-        IMP_INCLUDE,  // Implementation (.cpp) needs an include
-        INT_INCLUDE,  // Interface (.h) needs an include
-        IMP_FWD_CLASS,  // Implementation (.cpp) needs a forward class declaration
-        INT_FWD_CLASS,  // Interface (.h) needs a forward class declaration
+        // Enum values are compared with <, so order matters
+        INT_FWD_CLASS = 1 << 0,  // Interface (.h) needs a forward class declaration
+        INT_INCLUDE = 1 << 1,  // Interface (.h) needs an include
     };
     enum en m_e;
     VUseType()
-        : m_e{IMP_FWD_CLASS} {}
+        : m_e{INT_FWD_CLASS} {}
     // cppcheck-suppress noExplicitConstructor
     constexpr VUseType(en _e)
         : m_e{_e} {}
     explicit VUseType(int _e)
         : m_e(static_cast<en>(_e)) {}  // Need () or GCC 4.8 false warning
-    bool isInclude() const { return m_e == IMP_INCLUDE || m_e == INT_INCLUDE; }
-    bool isFwdClass() const { return m_e == IMP_FWD_CLASS || m_e == INT_FWD_CLASS; }
     constexpr operator en() const { return m_e; }
+    bool containsAny(VUseType other) { return m_e & other.m_e; }
     const char* ascii() const {
-        static const char* const names[] = {"IMP_INC", "INT_INC", "IMP_FWD", "INT_FWD"};
-        return names[m_e];
+        static const char* const names[] = {"INT_FWD", "INT_INC", "INT_FWD_INC"};
+        return names[m_e - 1];
     }
 };
 constexpr bool operator==(const VUseType& lhs, const VUseType& rhs) { return lhs.m_e == rhs.m_e; }
 constexpr bool operator==(const VUseType& lhs, VUseType::en rhs) { return lhs.m_e == rhs; }
 constexpr bool operator==(VUseType::en lhs, const VUseType& rhs) { return lhs == rhs.m_e; }
+constexpr VUseType::en operator|(VUseType::en lhs, VUseType::en rhs) {
+    return VUseType::en((uint8_t)lhs | (uint8_t)rhs);
+}
+constexpr VUseType::en operator&(VUseType::en lhs, VUseType::en rhs) {
+    return VUseType::en((uint8_t)lhs & (uint8_t)rhs);
+}
 inline std::ostream& operator<<(std::ostream& os, const VUseType& rhs) {
+    return os << rhs.ascii();
+}
+
+//######################################################################
+
+class VTraceType final {
+public:
+    enum en : uint8_t {
+        CONSTANT,  // Constant value dump (once at the beginning)
+        FULL,  // Full value dump (always emitted)
+        CHANGE  // Incremental value dump (emitted only if the value changed)
+    };
+    enum en m_e;
+    VTraceType()
+        : m_e{CONSTANT} {}
+    // cppcheck-suppress noExplicitConstructor
+    constexpr VTraceType(en _e)
+        : m_e{_e} {}
+    explicit VTraceType(int _e)
+        : m_e(static_cast<en>(_e)) {}  // Need () or GCC 4.8 false warning
+    constexpr operator en() const { return m_e; }
+    const char* ascii() const {
+        static const char* const names[] = {"CONSTANT", "FULL", "CHANGE"};
+        return names[m_e];
+    }
+};
+constexpr bool operator==(const VTraceType& lhs, const VTraceType& rhs) {
+    return lhs.m_e == rhs.m_e;
+}
+constexpr bool operator==(const VTraceType& lhs, VTraceType::en rhs) { return lhs.m_e == rhs; }
+constexpr bool operator==(VTraceType::en lhs, const VTraceType& rhs) { return lhs == rhs.m_e; }
+inline std::ostream& operator<<(std::ostream& os, const VTraceType& rhs) {
+    return os << rhs.ascii();
+}
+
+//######################################################################
+
+class VTracePrefixType final {
+public:
+    enum en : uint8_t {
+        // Note: Entries must match VerilatedTracePrefixType
+        ARRAY_PACKED,
+        ARRAY_UNPACKED,
+        SCOPE_MODULE,
+        SCOPE_INTERFACE,
+        STRUCT_PACKED,
+        STRUCT_UNPACKED,
+        UNION_PACKED,
+    };
+    enum en m_e;
+    // cppcheck-suppress noExplicitConstructor
+    constexpr VTracePrefixType(en _e)
+        : m_e{_e} {}
+    constexpr operator en() const { return m_e; }
+    const char* ascii() const {
+        static const char* const names[]
+            = {"ARRAY_PACKED",  "ARRAY_UNPACKED",  "SCOPE_MODULE", "SCOPE_INTERFACE",
+               "STRUCT_PACKED", "STRUCT_UNPACKED", "UNION_PACKED"};
+        return names[m_e];
+    }
+};
+constexpr bool operator==(const VTracePrefixType& lhs, const VTracePrefixType& rhs) {
+    return lhs.m_e == rhs.m_e;
+}
+constexpr bool operator==(const VTracePrefixType& lhs, VTracePrefixType::en rhs) {
+    return lhs.m_e == rhs;
+}
+constexpr bool operator==(VTracePrefixType::en lhs, const VTracePrefixType& rhs) {
+    return lhs == rhs.m_e;
+}
+inline std::ostream& operator<<(std::ostream& os, const VTracePrefixType& rhs) {
+    return os << rhs.ascii();
+}
+
+// ######################################################################
+
+class VCastable final {
+public:
+    enum en : uint8_t {
+        UNSUPPORTED,
+        SAMEISH,
+        COMPATIBLE,
+        ENUM_EXPLICIT,
+        ENUM_IMPLICIT,
+        DYNAMIC_CLASS,
+        INCOMPATIBLE,
+        _ENUM_MAX  // Leave last
+    };
+    enum en m_e;
+    const char* ascii() const {
+        static const char* const names[]
+            = {"UNSUPPORTED",   "SAMEISH",       "COMPATIBLE",  "ENUM_EXPLICIT",
+               "ENUM_IMPLICIT", "DYNAMIC_CLASS", "INCOMPATIBLE"};
+        return names[m_e];
+    }
+    VCastable()
+        : m_e{UNSUPPORTED} {}
+    // cppcheck-suppress noExplicitConstructor
+    constexpr VCastable(en _e)
+        : m_e{_e} {}
+    explicit VCastable(int _e)
+        : m_e(static_cast<en>(_e)) {}  // Need () or GCC 4.8 false warning
+    constexpr operator en() const { return m_e; }
+};
+constexpr bool operator==(const VCastable& lhs, const VCastable& rhs) {
+    return lhs.m_e == rhs.m_e;
+}
+constexpr bool operator==(const VCastable& lhs, VCastable::en rhs) { return lhs.m_e == rhs; }
+constexpr bool operator==(VCastable::en lhs, const VCastable& rhs) { return lhs == rhs.m_e; }
+inline std::ostream& operator<<(std::ostream& os, const VCastable& rhs) {
     return os << rhs.ascii();
 }
 
@@ -1209,6 +1452,44 @@ public:
         , m_numeric{numeric}
         , m_keyword{kwd} {}
     ~VBasicTypeKey() = default;
+};
+
+// ######################################################################
+//  VSelfPointerText - Represents text to be emitted before a given var reference, call, etc. to
+//  serve as a pointer to a 'self' object. For example, it could be empty (no self pointer), or the
+//  string 'this', or 'vlSymsp->...'
+
+class VSelfPointerText final {
+private:
+    // STATIC MEMBERS
+    // Keep these in shared pointers to avoid branching for special cases
+    static const std::shared_ptr<const string> s_emptyp;  // Holds ""
+    static const std::shared_ptr<const string> s_thisp;  // Holds "this"
+
+    // MEMBERS
+    std::shared_ptr<const string> m_strp;
+
+public:
+    // CONSTRUCTORS
+    class Empty {};  // for creator type-overload selection
+    VSelfPointerText(Empty)
+        : m_strp{s_emptyp} {}
+    class This {};  // for creator type-overload selection
+    VSelfPointerText(This)
+        : m_strp{s_thisp} {}
+    VSelfPointerText(This, const string& field)
+        : m_strp{std::make_shared<const string>("this->" + field)} {}
+    class VlSyms {};  // for creator type-overload selection
+    VSelfPointerText(VlSyms, const string& field)
+        : m_strp{std::make_shared<const string>("(&vlSymsp->" + field + ')')} {}
+
+    // METHODS
+    bool isEmpty() const { return m_strp == s_emptyp; }
+    bool isVlSym() const { return m_strp->find("vlSymsp") != string::npos; }
+    bool hasThis() const { return m_strp == s_thisp || VString::startsWith(*m_strp, "this"); }
+    string protect(bool useSelfForThis, bool protect) const;
+    const std::string& asString() const { return *m_strp; }
+    bool operator==(const VSelfPointerText& other) const { return *m_strp == *other.m_strp; }
 };
 
 //######################################################################
@@ -1293,57 +1574,46 @@ protected:
 class VNUser1InUse final : VNUserInUseBase {
 protected:
     friend class AstNode;
-    static uint32_t     s_userCntGbl;   // Count of which usage of userp() this is
-    static bool         s_userBusy;     // Count is in use
+    static uint32_t s_userCntGbl;  // Count of which usage of userp() this is
+    static bool s_userBusy;  // Count is in use
 public:
-    VNUser1InUse()     { allocate(1, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    ~VNUser1InUse()    { free    (1, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    VNUser1InUse()      { allocate(1, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    ~VNUser1InUse()     { free    (1, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void clear() { clearcnt(1, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void check() { checkcnt(1, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
 };
 class VNUser2InUse final : VNUserInUseBase {
 protected:
     friend class AstNode;
-    static uint32_t     s_userCntGbl;   // Count of which usage of userp() this is
-    static bool         s_userBusy;     // Count is in use
+    static uint32_t s_userCntGbl;  // Count of which usage of userp() this is
+    static bool s_userBusy;  // Count is in use
 public:
-    VNUser2InUse()     { allocate(2, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    ~VNUser2InUse()    { free    (2, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    VNUser2InUse()      { allocate(2, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    ~VNUser2InUse()     { free    (2, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void clear() { clearcnt(2, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void check() { checkcnt(2, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
 };
 class VNUser3InUse final : VNUserInUseBase {
 protected:
     friend class AstNode;
-    static uint32_t     s_userCntGbl;   // Count of which usage of userp() this is
-    static bool         s_userBusy;     // Count is in use
+    static uint32_t s_userCntGbl;  // Count of which usage of userp() this is
+    static bool s_userBusy;  // Count is in use
 public:
-    VNUser3InUse()     { allocate(3, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    ~VNUser3InUse()    { free    (3, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    VNUser3InUse()      { allocate(3, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    ~VNUser3InUse()     { free    (3, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void clear() { clearcnt(3, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void check() { checkcnt(3, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
 };
 class VNUser4InUse final : VNUserInUseBase {
 protected:
     friend class AstNode;
-    static uint32_t     s_userCntGbl;   // Count of which usage of userp() this is
-    static bool         s_userBusy;     // Count is in use
+    static uint32_t s_userCntGbl;  // Count of which usage of userp() this is
+    static bool s_userBusy;  // Count is in use
 public:
-    VNUser4InUse()     { allocate(4, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    ~VNUser4InUse()    { free    (4, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    VNUser4InUse()      { allocate(4, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
+    ~VNUser4InUse()     { free    (4, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void clear() { clearcnt(4, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
     static void check() { checkcnt(4, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-};
-class VNUser5InUse final : VNUserInUseBase {
-protected:
-    friend class AstNode;
-    static uint32_t     s_userCntGbl;   // Count of which usage of userp() this is
-    static bool         s_userBusy;     // Count is in use
-public:
-    VNUser5InUse()     { allocate(5, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    ~VNUser5InUse()    { free    (5, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    static void clear() { clearcnt(5, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
-    static void check() { checkcnt(5, s_userCntGbl/*ref*/, s_userBusy/*ref*/); }
 };
 // clang-format on
 
@@ -1353,7 +1623,7 @@ public:
 // nodes needs to be deferred to a later time, because pointers to the
 // removed nodes might still exist.
 
-class VNDeleter VL_NOT_FINAL {
+class VNDeleter final {
     // MEMBERS
     std::vector<AstNode*> m_deleteps;  // Nodes to delete
 
@@ -1366,11 +1636,11 @@ public:
         m_deleteps.push_back(nodep);
     }
 
-    // Delete all previously pushed nodes (by callint deleteTree)
+    // Delete all previously pushed nodes (by calling deleteTree)
     void doDeletes();
 
     // Do the deletions on destruction
-    virtual ~VNDeleter() { doDeletes(); }
+    ~VNDeleter() { doDeletes(); }
 };
 
 //######################################################################
@@ -1379,7 +1649,7 @@ public:
 // This only has the constant fuctions for non-modifying visitors.
 // For more typical usage see VNVisitor
 
-class VNVisitorConst VL_NOT_FINAL : public VNDeleter {
+class VNVisitorConst VL_NOT_FINAL {
     friend class AstNode;
 
 public:
@@ -1397,6 +1667,7 @@ public:
     inline void iterateAndNextConstNullBackwards(AstNode* nodep);
 
     virtual void visit(AstNode* nodep) = 0;
+    virtual ~VNVisitorConst() {}
 #include "V3Ast__gen_visitor_decls.h"  // From ./astgen
 };
 
@@ -1405,6 +1676,7 @@ public:
 // type without changing the base classes.  See "Modern C++ Design".
 
 class VNVisitor VL_NOT_FINAL : public VNVisitorConst {
+    VNDeleter m_deleter;  // Used to delay deletion of nodes
 public:
     /// Call visit()s on nodep
     inline void iterate(AstNode* nodep);
@@ -1416,6 +1688,10 @@ public:
     inline void iterateAndNextNull(AstNode* nodep);
     /// Return edited nodep; see comments in V3Ast.cpp
     inline AstNode* iterateSubtreeReturnEdits(AstNode* nodep);
+
+    VNDeleter& deleter() { return m_deleter; }
+    void pushDeletep(AstNode* nodep) { deleter().pushDeletep(nodep); }
+    void doDeletes() { deleter().doDeletes(); }
 };
 
 //######################################################################
@@ -1542,8 +1818,6 @@ class AstNode VL_NOT_FINAL {
     uint32_t m_user3Cnt = 0;  // Mark of when userp was set
     uint32_t m_user4Cnt = 0;  // Mark of when userp was set
     VNUser m_user4u{0};  // Contains any information the user iteration routine wants
-    VNUser m_user5u{0};  // Contains any information the user iteration routine wants
-    uint32_t m_user5Cnt = 0;  // Mark of when userp was set
 
     // METHODS
     void op1p(AstNode* nodep) {
@@ -1564,8 +1838,8 @@ class AstNode VL_NOT_FINAL {
     }
 
 private:
-    AstNode* cloneTreeIter();
-    AstNode* cloneTreeIterList();
+    AstNode* cloneTreeIter(bool needPure);
+    AstNode* cloneTreeIterList(bool needPure);
     void checkTreeIter(const AstNode* prevBackp) const VL_MT_STABLE;
     bool gateTreeIter() const;
     static bool sameTreeIter(const AstNode* node1p, const AstNode* node2p, bool ignNext,
@@ -1618,13 +1892,16 @@ protected:
         UASSERT_STATIC(s_cloneCntGbl, "Rollover");
     }
 
+    // Use instead isSame(), this is for each Ast* class, and assumes node is of same type
+    virtual bool same(const AstNode*) const { return true; }
+
 public:
     // ACCESSORS
     VNType type() const VL_MT_SAFE { return m_type; }
     const char* typeName() const VL_MT_SAFE { return type().ascii(); }  // See also prettyTypeName
     AstNode* nextp() const VL_MT_STABLE { return m_nextp; }
     AstNode* backp() const VL_MT_STABLE { return m_backp; }
-    AstNode* abovep() const;  // Parent node above, only when no nextp() as otherwise slow
+    AstNode* abovep() const;  // Get parent node above, only for list head and tail
     AstNode* op1p() const VL_MT_STABLE { return m_op1p; }
     AstNode* op2p() const VL_MT_STABLE { return m_op2p; }
     AstNode* op3p() const VL_MT_STABLE { return m_op3p; }
@@ -1676,7 +1953,7 @@ public:
     static constexpr int INSTR_COUNT_PLI = 20;  // PLI routines
 
     // ACCESSORS
-    virtual string name() const VL_MT_STABLE { return ""; }
+    virtual string name() const { return ""; }
     virtual string origName() const { return ""; }
     virtual void name(const string& name) {
         this->v3fatalSrc("name() called on object without name() method");
@@ -1684,7 +1961,7 @@ public:
     virtual void tag(const string& text) {}
     virtual string tag() const { return ""; }
     virtual string verilogKwd() const { return ""; }
-    string nameProtect() const VL_MT_STABLE;  // Name with --protect-id applied
+    string nameProtect() const;  // Name with --protect-id applied
     string origNameProtect() const;  // origName with --protect-id applied
     string shortName() const;  // Name with __PVT__ removed for concatenating scopes
     static string dedotName(const string& namein);  // Name with dots removed
@@ -1697,10 +1974,10 @@ public:
     static string encodeName(const string& namein);
     static string encodeNumber(int64_t num);  // Encode number into internal C representation
     static string vcdName(const string& namein);  // Name for printing out to vcd files
-    string prettyName() const VL_MT_STABLE { return prettyName(name()); }
+    string prettyName() const { return prettyName(name()); }
     string prettyNameQ() const { return prettyNameQ(name()); }
     // "VARREF" for error messages (NOT dtype's pretty name)
-    string prettyTypeName() const VL_MT_STABLE;
+    string prettyTypeName() const;
     virtual string prettyOperatorName() const { return "operator " + prettyTypeName(); }
     FileLine* fileline() const VL_MT_SAFE { return m_fileline; }
     void fileline(FileLine* fl) { m_fileline = fl; }
@@ -1730,83 +2007,71 @@ public:
     inline bool isDouble() const VL_MT_STABLE;
     inline bool isSigned() const VL_MT_STABLE;
     inline bool isString() const VL_MT_STABLE;
+    inline bool isEvent() const VL_MT_STABLE;
 
     // clang-format off
-    VNUser      user1u() const VL_MT_STABLE {
+    VNUser user1u() const VL_MT_STABLE {
         // Slows things down measurably, so disabled by default
-        //UASSERT_STATIC(VNUser1InUse::s_userBusy, "userp set w/o busy");
-        return ((m_user1Cnt==VNUser1InUse::s_userCntGbl) ? m_user1u : VNUser{0});
+        //UASSERT_STATIC(VNUser1InUse::s_userBusy, "user1p used without AstUserInUse");
+        return ((m_user1Cnt == VNUser1InUse::s_userCntGbl) ? m_user1u : VNUser{0});
     }
-    AstNode*    user1p() const VL_MT_STABLE { return user1u().toNodep(); }
-    void        user1u(const VNUser& user) { m_user1u=user; m_user1Cnt=VNUser1InUse::s_userCntGbl; }
-    void        user1p(void* userp) { user1u(VNUser{userp}); }
-    int         user1() const { return user1u().toInt(); }
-    void        user1(int val) { user1u(VNUser{val}); }
-    int         user1Inc(int val=1) { int v=user1(); user1(v+val); return v; }
-    int         user1SetOnce() { int v=user1(); if (!v) user1(1); return v; }  // Better for cache than user1Inc()
+    AstNode* user1p() const VL_MT_STABLE { return user1u().toNodep(); }
+    void user1u(const VNUser& user) { m_user1u = user; m_user1Cnt = VNUser1InUse::s_userCntGbl; }
+    void user1p(void* userp) { user1u(VNUser{userp}); }
+    void user1(int val) { user1u(VNUser{val}); }
+    int user1() const { return user1u().toInt(); }
+    int user1Inc(int val = 1) { int v = user1(); user1(v + val); return v; }
+    int user1SetOnce() { int v = user1(); if (!v) user1(1); return v; }  // Better for cache than user1Inc()
     static void user1ClearTree() { VNUser1InUse::clear(); }  // Clear userp()'s across the entire tree
 
-    VNUser      user2u() const VL_MT_STABLE {
+    VNUser user2u() const VL_MT_STABLE {
         // Slows things down measurably, so disabled by default
-        //UASSERT_STATIC(VNUser2InUse::s_userBusy, "userp set w/o busy");
-        return ((m_user2Cnt==VNUser2InUse::s_userCntGbl) ? m_user2u : VNUser{0});
+        //UASSERT_STATIC(VNUser2InUse::s_userBusy, "user2p used without AstUserInUse");
+        return ((m_user2Cnt == VNUser2InUse::s_userCntGbl) ? m_user2u : VNUser{0});
     }
-    AstNode*    user2p() const VL_MT_STABLE { return user2u().toNodep(); }
-    void        user2u(const VNUser& user) { m_user2u=user; m_user2Cnt=VNUser2InUse::s_userCntGbl; }
-    void        user2p(void* userp) { user2u(VNUser{userp}); }
-    int         user2() const { return user2u().toInt(); }
-    void        user2(int val) { user2u(VNUser{val}); }
-    int         user2Inc(int val=1) { int v=user2(); user2(v+val); return v; }
-    int         user2SetOnce() { int v=user2(); if (!v) user2(1); return v; }  // Better for cache than user2Inc()
+    AstNode* user2p() const VL_MT_STABLE { return user2u().toNodep(); }
+    void user2u(const VNUser& user) { m_user2u = user; m_user2Cnt = VNUser2InUse::s_userCntGbl; }
+    void user2p(void* userp) { user2u(VNUser{userp}); }
+    void user2(int val) { user2u(VNUser{val}); }
+    int user2() const { return user2u().toInt(); }
+    int user2Inc(int val = 1) { int v = user2(); user2(v + val); return v; }
+    int user2SetOnce() { int v = user2(); if (!v) user2(1); return v; }  // Better for cache than user2Inc()
     static void user2ClearTree() { VNUser2InUse::clear(); }  // Clear userp()'s across the entire tree
 
-    VNUser      user3u() const VL_MT_STABLE {
+    VNUser user3u() const VL_MT_STABLE {
         // Slows things down measurably, so disabled by default
-        //UASSERT_STATIC(VNUser3InUse::s_userBusy, "userp set w/o busy");
-        return ((m_user3Cnt==VNUser3InUse::s_userCntGbl) ? m_user3u : VNUser{0});
+        //UASSERT_STATIC(VNUser3InUse::s_userBusy, "user3p used without AstUserInUse");
+        return ((m_user3Cnt == VNUser3InUse::s_userCntGbl) ? m_user3u : VNUser{0});
     }
-    AstNode*    user3p() const VL_MT_STABLE { return user3u().toNodep(); }
-    void        user3u(const VNUser& user) { m_user3u=user; m_user3Cnt=VNUser3InUse::s_userCntGbl; }
-    void        user3p(void* userp) { user3u(VNUser{userp}); }
-    int         user3() const { return user3u().toInt(); }
-    void        user3(int val) { user3u(VNUser{val}); }
-    int         user3Inc(int val=1) { int v=user3(); user3(v+val); return v; }
-    int         user3SetOnce() { int v=user3(); if (!v) user3(1); return v; }  // Better for cache than user3Inc()
+    AstNode* user3p() const VL_MT_STABLE { return user3u().toNodep(); }
+    void user3u(const VNUser& user) { m_user3u = user; m_user3Cnt = VNUser3InUse::s_userCntGbl; }
+    void user3p(void* userp) { user3u(VNUser{userp}); }
+    void user3(int val) { user3u(VNUser{val}); }
+    int user3() const { return user3u().toInt(); }
+    int user3Inc(int val = 1) { int v = user3(); user3(v + val); return v; }
+    int user3SetOnce() { int v = user3(); if (!v) user3(1); return v; }  // Better for cache than user3Inc()
     static void user3ClearTree() { VNUser3InUse::clear(); }  // Clear userp()'s across the entire tree
 
-    VNUser      user4u() const VL_MT_STABLE {
+    VNUser user4u() const VL_MT_STABLE {
         // Slows things down measurably, so disabled by default
-        //UASSERT_STATIC(VNUser4InUse::s_userBusy, "userp set w/o busy");
-        return ((m_user4Cnt==VNUser4InUse::s_userCntGbl) ? m_user4u : VNUser{0});
+        //UASSERT_STATIC(VNUser4InUse::s_userBusy, "user4p used without AstUserInUse");
+        return ((m_user4Cnt == VNUser4InUse::s_userCntGbl) ? m_user4u : VNUser{0});
     }
-    AstNode*    user4p() const VL_MT_STABLE { return user4u().toNodep(); }
-    void        user4u(const VNUser& user) { m_user4u=user; m_user4Cnt=VNUser4InUse::s_userCntGbl; }
-    void        user4p(void* userp) { user4u(VNUser{userp}); }
-    int         user4() const { return user4u().toInt(); }
-    void        user4(int val) { user4u(VNUser{val}); }
-    int         user4Inc(int val=1) { int v=user4(); user4(v+val); return v; }
-    int         user4SetOnce() { int v=user4(); if (!v) user4(1); return v; }  // Better for cache than user4Inc()
+    AstNode* user4p() const VL_MT_STABLE { return user4u().toNodep(); }
+    void user4u(const VNUser& user) { m_user4u = user; m_user4Cnt = VNUser4InUse::s_userCntGbl; }
+    void user4p(void* userp) { user4u(VNUser{userp}); }
+    void user4(int val) { user4u(VNUser{val}); }
+    int user4() const { return user4u().toInt(); }
+    int user4Inc(int val = 1) { int v = user4(); user4(v + val); return v; }
+    int user4SetOnce() { int v = user4(); if (!v) user4(1); return v; }  // Better for cache than user4Inc()
     static void user4ClearTree() { VNUser4InUse::clear(); }  // Clear userp()'s across the entire tree
-
-    VNUser      user5u() const VL_MT_STABLE {
-        // Slows things down measurably, so disabled by default
-        //UASSERT_STATIC(VNUser5InUse::s_userBusy, "userp set w/o busy");
-        return ((m_user5Cnt==VNUser5InUse::s_userCntGbl) ? m_user5u : VNUser{0});
-    }
-    AstNode*    user5p() const VL_MT_STABLE { return user5u().toNodep(); }
-    void        user5u(const VNUser& user) { m_user5u=user; m_user5Cnt=VNUser5InUse::s_userCntGbl; }
-    void        user5p(void* userp) { user5u(VNUser{userp}); }
-    int         user5() const { return user5u().toInt(); }
-    void        user5(int val) { user5u(VNUser{val}); }
-    int         user5Inc(int val=1) { int v=user5(); user5(v+val); return v; }
-    int         user5SetOnce() { int v=user5(); if (!v) user5(1); return v; }  // Better for cache than user5Inc()
-    static void user5ClearTree() { VNUser5InUse::clear(); }  // Clear userp()'s across the entire tree
     // clang-format on
 
 #ifdef VL_DEBUG
     uint64_t editCount() const { return m_editCount; }
     void editCountInc() {
         m_editCount = ++s_editCntGbl;  // Preincrement, so can "watch AstNode::s_editCntGbl=##"
+        VIsCached::clearCacheTree();  // Any edit clears all caching
     }
 #else
     void editCountInc() { ++s_editCntGbl; }
@@ -1817,6 +2082,7 @@ public:
 
     // ACCESSORS for specific types
     // Alas these can't be virtual or they break when passed a nullptr
+    inline bool isClassHandleValue() const;
     inline bool isZero() const;
     inline bool isOne() const;
     inline bool isNeqZero() const;
@@ -1856,6 +2122,7 @@ public:
     void dtypeSetUInt64() { dtypep(findUInt64DType()); }  // Twostate
     void dtypeSetEmptyQueue() { dtypep(findEmptyQueueDType()); }
     void dtypeSetVoid() { dtypep(findVoidDType()); }
+    void dtypeSetStream() { dtypep(findStreamDType()); }
 
     // Data type locators
     AstNodeDType* findBitDType() const { return findBasicDType(VBasicDTypeKwd::LOGIC); }
@@ -1867,6 +2134,7 @@ public:
     AstNodeDType* findCHandleDType() const { return findBasicDType(VBasicDTypeKwd::CHANDLE); }
     AstNodeDType* findEmptyQueueDType() const;
     AstNodeDType* findVoidDType() const;
+    AstNodeDType* findStreamDType() const;
     AstNodeDType* findQueueIndexDType() const;
     AstNodeDType* findBitDType(int width, int widthMin, VSigning numeric) const;
     AstNodeDType* findLogicDType(int width, int widthMin, VSigning numeric) const;
@@ -1876,10 +2144,14 @@ public:
     AstNodeDType* findBasicDType(VBasicDTypeKwd kwd) const;
     static AstBasicDType* findInsertSameDType(AstBasicDType* nodep);
 
+    static VCastable computeCastable(const AstNodeDType* toDtp, const AstNodeDType* fromDtp,
+                                     const AstNode* fromConstp);
+    static AstNodeDType* getCommonClassTypep(AstNode* nodep1, AstNode* nodep2);
+
     // METHODS - dump and error
-    void v3errorEnd(std::ostringstream& str) const VL_REQUIRES(V3Error::s().m_mutex);
+    void v3errorEnd(std::ostringstream& str) const VL_RELEASE(V3Error::s().m_mutex);
     void v3errorEndFatal(std::ostringstream& str) const VL_ATTR_NORETURN
-        VL_REQUIRES(V3Error::s().m_mutex);
+        VL_RELEASE(V3Error::s().m_mutex);
     string warnContextPrimary() const VL_REQUIRES(V3Error::s().m_mutex) {
         return fileline()->warnContextPrimary();
     }
@@ -1917,11 +2189,9 @@ public:
                              AstNode* belowp);  // When calling, "this" is second argument
 
     // METHODS - Iterate on a tree
-    // Clone or return nullptr if nullptr
-    static AstNode* cloneTreeNull(AstNode* nodep, bool cloneNextLink) {
-        return nodep ? nodep->cloneTree(cloneNextLink) : nullptr;
-    }
-    AstNode* cloneTree(bool cloneNextLink);  // Not const, as sets clonep() on original nodep
+    AstNode* cloneTree(bool cloneNextLink,
+                       bool needPure = false);  // Not const, as sets clonep() on original nodep
+    AstNode* cloneTreePure(bool cloneNextLink) { return cloneTree(cloneNextLink, true); }
     bool gateTree() { return gateTreeIter(); }  // Is tree isGateOptimizable?
     inline bool sameTree(const AstNode* node2p) const;  // Does tree of this == node2p?
     // Does tree of this == node2p?, not allowing non-isGateOptimizable
@@ -1946,7 +2216,14 @@ public:
     void dumpTreeDot(std::ostream& os = std::cout) const;
     void dumpTreeDotFile(const string& filename, bool append = false, bool doDump = true);
 
-    bool isTreePureRecurse() const;
+    // METHODS - static advancement
+    static AstNode* afterCommentp(AstNode* nodep) {
+        // Skip over comments starting at provided nodep,
+        // such as to determine if a AstIf is empty.
+        // nodep may be null, if so return nullptr.
+        while (nodep && VN_IS(nodep, Comment)) nodep = nodep->nextp();
+        return nodep;
+    }
 
     // METHODS - queries
     // Changes control flow, disable some optimizations
@@ -1956,11 +2233,13 @@ public:
     // GateDedupable is a slightly larger superset of GateOptimzable (eg, AstNodeIf)
     virtual bool isGateDedupable() const { return isGateOptimizable(); }
     // Else creates output or exits, etc, not unconsumed
-    virtual bool isOutputter() const { return false; }
+    virtual bool isOutputter() { return false; }
     // Else a AstTime etc which output can't be predicted from input
     virtual bool isPredictOptimizable() const { return !isTimingControl(); }
     // Else a $display, etc, that must be ordered with other displays
-    virtual bool isPure() const { return true; }
+    virtual bool isPure() { return true; }
+    // Iff isPure on current node and any nextp()
+    bool isPureAndNext() { return isPure() && (!nextp() || nextp()->isPure()); }
     // Else a AstTime etc that can't be substituted out
     virtual bool isSubstOptimizable() const { return true; }
     // An event control, delay, wait, etc.
@@ -1969,7 +2248,10 @@ public:
     // statement is unlikely to be taken
     virtual bool isUnlikely() const { return false; }
     virtual int instrCount() const { return 0; }
-    virtual bool same(const AstNode*) const { return true; }
+    // Iff node is identical to anouther node
+    virtual bool isSame(const AstNode* samep) const {
+        return type() == samep->type() && same(samep);
+    }
     // Iff has a data type; dtype() must be non null
     virtual bool hasDType() const VL_MT_SAFE { return false; }
     // Iff has a non-null childDTypep(), as generic node function
@@ -2054,24 +2336,34 @@ public:
         return nodep && privateTypeTest<T>(nodep) ? reinterpret_cast<const T*>(nodep) : nullptr;
     }
 
-    // For use via the VN_AS macro only
+    // For use via privateAs or the VN_DBG_AS macro only
     template <typename T, typename E>
-    static T* privateAs(AstNode* nodep) VL_PURE {
+    static T* unsafePrivateAs(AstNode* nodep) VL_PURE {
         static_assert(!uselessCast<T, E>(), "Unnecessary VN_AS, node known to have target type.");
         static_assert(!impossibleCast<T, E>(), "Unnecessary VN_AS, node cannot be this type.");
-        UASSERT_OBJ(!nodep || privateTypeTest<T>(nodep), nodep,
-                    "AstNode is not of expected type, but instead has type '" << nodep->typeName()
-                                                                              << "'");
         return reinterpret_cast<T*>(nodep);
     }
     template <typename T, typename E>
-    static const T* privateAs(const AstNode* nodep) VL_PURE {
+    static const T* unsafePrivateAs(const AstNode* nodep) VL_PURE {
         static_assert(!uselessCast<T, E>(), "Unnecessary VN_AS, node known to have target type.");
         static_assert(!impossibleCast<T, E>(), "Unnecessary VN_AS, node cannot be this type.");
+        return reinterpret_cast<const T*>(nodep);
+    }
+
+    // For use via the VN_AS macro only
+    template <typename T, typename E>
+    static T* privateAs(AstNode* nodep) VL_PURE {
         UASSERT_OBJ(!nodep || privateTypeTest<T>(nodep), nodep,
                     "AstNode is not of expected type, but instead has type '" << nodep->typeName()
                                                                               << "'");
-        return reinterpret_cast<const T*>(nodep);
+        return unsafePrivateAs<T, E>(nodep);
+    }
+    template <typename T, typename E>
+    static const T* privateAs(const AstNode* nodep) VL_PURE {
+        UASSERT_OBJ(!nodep || privateTypeTest<T>(nodep), nodep,
+                    "AstNode is not of expected type, but instead has type '" << nodep->typeName()
+                                                                              << "'");
+        return unsafePrivateAs<T, E>(nodep);
     }
 
     // Predicate that returns true if the given 'nodep' might have a descendant of type 'T_Node'.

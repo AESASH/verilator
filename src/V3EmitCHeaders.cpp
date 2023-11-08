@@ -14,12 +14,10 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstMT.h"
 
 #include "V3EmitC.h"
 #include "V3EmitCConstInit.h"
-#include "V3Global.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -172,7 +170,7 @@ class EmitCHeader final : public EmitCConstInit {
         if (v3Global.opt.coverage() && !VN_IS(modp, Class)) {
             decorateFirst(first, section);
             puts("void __vlCoverInsert(");
-            puts(v3Global.opt.threads() ? "std::atomic<uint32_t>" : "uint32_t");
+            puts(v3Global.opt.threads() > 1 ? "std::atomic<uint32_t>" : "uint32_t");
             puts("* countp, bool enable, const char* filenamep, int lineno, int column,\n");
             puts("const char* hierp, const char* pagep, const char* commentp, const char* "
                  "linescovp);\n");
@@ -239,25 +237,18 @@ class EmitCHeader final : public EmitCConstInit {
             puts(";\n");
         }
 
-        puts("\nbool operator==(const " + EmitCBase::prefixNameProtect(sdtypep) + "& rhs){\n");
+        puts("\nbool operator==(const " + EmitCBase::prefixNameProtect(sdtypep)
+             + "& rhs) const {\n");
         puts("return ");
         for (const AstMemberDType* itemp = sdtypep->membersp(); itemp;
              itemp = VN_AS(itemp->nextp(), MemberDType)) {
             if (itemp != sdtypep->membersp()) puts("\n    && ");
-            if (AstUnpackArrayDType* const adtypep
-                = VN_CAST(itemp->subDTypep(), UnpackArrayDType)) {
-                for (uint32_t i = 0; i < adtypep->arrayUnpackedElements(); i++) {
-                    if (i != 0) puts("\n    && ");
-                    puts(itemp->nameProtect() + "[" + std::to_string(i) + "U] == " + "rhs."
-                         + itemp->nameProtect() + "[" + std::to_string(i) + "U]");
-                }
-            } else {
-                puts(itemp->nameProtect() + " == " + "rhs." + itemp->nameProtect());
-            }
+            puts(itemp->nameProtect() + " == " + "rhs." + itemp->nameProtect());
         }
         puts(";\n");
         puts("}\n");
-        puts("bool operator!=(const " + EmitCBase::prefixNameProtect(sdtypep) + "& rhs){\n");
+        puts("bool operator!=(const " + EmitCBase::prefixNameProtect(sdtypep)
+             + "& rhs) const {\n");
         puts("return !(*this == rhs);\n}\n");
         puts("};\n");
     }
@@ -386,11 +377,10 @@ class EmitCHeader final : public EmitCConstInit {
         std::set<string> cuse_set;
         auto add_to_cuse_set = [&](string s) { cuse_set.insert(s); };
 
-        forModCUse(modp, VUseType::INT_INCLUDE, add_to_cuse_set);
-        forModCUse(modp, VUseType::INT_FWD_CLASS, add_to_cuse_set);
+        forModCUse(modp, VUseType::INT_FWD_CLASS | VUseType::INT_INCLUDE, add_to_cuse_set);
         if (const AstClassPackage* const packagep = VN_CAST(modp, ClassPackage)) {
-            forModCUse(packagep->classp(), VUseType::INT_INCLUDE, add_to_cuse_set);
-            forModCUse(packagep->classp(), VUseType::INT_FWD_CLASS, add_to_cuse_set);
+            forModCUse(packagep->classp(), VUseType::INT_INCLUDE | VUseType::INT_FWD_CLASS,
+                       add_to_cuse_set);
         }
 
         for (const string& s : cuse_set) puts(s);

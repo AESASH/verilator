@@ -119,7 +119,7 @@ public:
         if (VL_UNCOVERABLE(symCurrentp()->nodep() != nodep)) {  // LCOV_EXCL_START
             if (debug()) {
                 showUpward();
-                dumpSelf(cout, "-mism: ");
+                dumpSelf(std::cout, "-mism: ");
             }
             nodep->v3fatalSrc("Symbols suggest ending " << symCurrentp()->nodep()->prettyTypeName()
                                                         << " but parser thinks ending "
@@ -129,6 +129,13 @@ public:
         m_sympStack.pop_back();
         UASSERT_OBJ(!m_sympStack.empty(), nodep, "symbol stack underflow");
         m_symCurrentp = m_sympStack.back();
+    }
+    AstNodeModule* findTopNodeModule(FileLine* fl, bool requireNoneNull = true) {
+        for (VSymEnt* const symp : vlstd::reverse_view(m_sympStack)) {
+            if (AstNodeModule* const modp = VN_CAST(symp->nodep(), NodeModule)) return modp;
+        }
+        if (requireNoneNull) fl->v3fatalSrc("fail to find current module");
+        return nullptr;
     }
     void showUpward() {  // LCOV_EXCL_START
         UINFO(1, "ParseSym Stack:\n");

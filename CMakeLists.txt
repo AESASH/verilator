@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 3.15)
 cmake_policy(SET CMP0091 NEW) # Use MSVC_RUNTIME_LIBRARY to select the runtime
 project(Verilator
-    VERSION 5.011
+    VERSION 5.019
     HOMEPAGE_URL https://verilator.org
     LANGUAGES CXX
 )
@@ -35,7 +35,7 @@ if (NOT WIN32)
     message(WARNING "CMake support on Linux/OSX is experimental.")
 endif()
 
-if (MSVC)
+if (WIN32)
     if (DEFINED ENV{WIN_FLEX_BISON})
         set(WIN_FLEX_BISON "$ENV{WIN_FLEX_BISON}")
     endif()

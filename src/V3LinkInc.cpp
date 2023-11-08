@@ -36,13 +36,9 @@
 //
 //*************************************************************************
 
-#include "config_build.h"
-#include "verilatedos.h"
+#include "V3PchAstNoMT.h"  // VL_MT_DISABLED_CODE_UNIT
 
 #include "V3LinkInc.h"
-
-#include "V3Ast.h"
-#include "V3Global.h"
 
 #include <algorithm>
 
@@ -61,13 +57,30 @@ private:
 
     // STATE
     AstNodeFTask* m_ftaskp = nullptr;  // Function or task we're inside
+    AstNodeModule* m_modp = nullptr;  // Module we're inside
     int m_modIncrementsNum = 0;  // Var name counter
     InsertMode m_insMode = IM_BEFORE;  // How to insert
     AstNode* m_insStmtp = nullptr;  // Where to insert statement
     bool m_unsupportedHere = false;  // Used to detect where it's not supported yet
 
     // METHODS
-    void insertBeforeStmt(AstNode* nodep, AstNode* newp) {
+    void insertOnTop(AstNode* newp) {
+        // Add the thing directly under the current TFunc/Module
+        AstNode* stmtsp = nullptr;
+        if (m_ftaskp) {
+            stmtsp = m_ftaskp->stmtsp();
+        } else if (m_modp) {
+            stmtsp = m_modp->stmtsp();
+        }
+        UASSERT(stmtsp, "Variable not under FTASK/MODULE");
+        newp->addNext(stmtsp->unlinkFrBackWithNext());
+        if (m_ftaskp) {
+            m_ftaskp->addStmtsp(newp);
+        } else if (m_modp) {
+            m_modp->addStmtsp(newp);
+        }
+    }
+    void insertNextToStmt(AstNode* nodep, AstNode* newp) {
         // Return node that must be visited, if any
         if (debug() >= 9) newp->dumpTree("-  newstmt: ");
         UASSERT_OBJ(m_insStmtp, nodep, "Function not underneath a statement");
@@ -88,7 +101,9 @@ private:
 
     // VISITORS
     void visit(AstNodeModule* nodep) override {
+        VL_RESTORER(m_modp);
         VL_RESTORER(m_modIncrementsNum);
+        m_modp = nodep;
         m_modIncrementsNum = 0;
         iterateChildren(nodep);
     }
@@ -199,16 +214,6 @@ private:
     }
     void prepost_stmt_visit(AstNodeTriop* nodep) {
         iterateChildren(nodep);
-
-        // Currently we can't reference the target, so we just copy the AST both for read and
-        // write, but doing so would double any side-effects, so as a safety measure all
-        // statements which could have side-effects are banned at the moment.
-        if (!nodep->rhsp()->isTreePureRecurse()) {
-            nodep->rhsp()->v3warn(E_UNSUPPORTED,
-                                  "Unsupported: Inc/Dec of expression with side-effects");
-            return;
-        }
-
         AstConst* const constp = VN_AS(nodep->lhsp(), Const);
         UASSERT_OBJ(nodep, constp, "Expecting CONST");
         AstConst* const newconstp = constp->cloneTree(true);
@@ -229,30 +234,19 @@ private:
     }
     void prepost_expr_visit(AstNodeTriop* nodep) {
         iterateChildren(nodep);
-
-        // Currently we can't reference the target, so we just copy the AST both for read and
-        // write, but doing so would double any side-effects, so as a safety measure all
-        // statements which could have side-effects are banned at the moment.
-        if (!nodep->rhsp()->isTreePureRecurse()) {
-            nodep->rhsp()->v3warn(E_UNSUPPORTED,
-                                  "Unsupported: Inc/Dec of expression with side-effects");
-            return;
-        }
-
         if (m_unsupportedHere) {
             nodep->v3warn(E_UNSUPPORTED, "Unsupported: Incrementation in this context.");
             return;
         }
         AstNodeExpr* const readp = nodep->rhsp();
-        AstNodeExpr* const writep = nodep->thsp();
+        AstNodeExpr* const writep = nodep->thsp()->unlinkFrBack();
 
         AstConst* const constp = VN_AS(nodep->lhsp(), Const);
         UASSERT_OBJ(nodep, constp, "Expecting CONST");
-        const AstNode* const backp = nodep->backp();
         AstConst* const newconstp = constp->cloneTree(true);
 
         // Prepare a temporary variable
-        FileLine* const fl = backp->fileline();
+        FileLine* const fl = nodep->fileline();
         const string name = string{"__Vincrement"} + cvtToStr(++m_modIncrementsNum);
         AstVar* const varp = new AstVar{
             fl, VVarType::BLOCKTEMP, name, VFlagChildDType{},
@@ -260,30 +254,33 @@ private:
         if (m_ftaskp) varp->funcLocal(true);
 
         // Declare the variable
-        insertBeforeStmt(nodep, varp);
+        insertOnTop(varp);
 
         // Define what operation will we be doing
         AstNodeExpr* operp;
         if (VN_IS(nodep, PostSub) || VN_IS(nodep, PreSub)) {
-            operp = new AstSub{fl, readp->cloneTree(true), newconstp};
+            operp = new AstSub{fl, readp->cloneTreePure(true), newconstp};
         } else {
-            operp = new AstAdd{fl, readp->cloneTree(true), newconstp};
+            operp = new AstAdd{fl, readp->cloneTreePure(true), newconstp};
         }
 
         if (VN_IS(nodep, PreAdd) || VN_IS(nodep, PreSub)) {
             // PreAdd/PreSub operations
             // Immediately after declaration - increment it by one
-            varp->addNextHere(new AstAssign{fl, writep->cloneTree(true),
-                                            new AstVarRef{fl, varp, VAccess::READ}});
+            AstAssign* const assignp
+                = new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE}, operp};
+            insertNextToStmt(nodep, assignp);
             // Immediately after incrementing - assign it to the original variable
-            varp->addNextHere(new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE}, operp});
+            assignp->addNextHere(
+                new AstAssign{fl, writep, new AstVarRef{fl, varp, VAccess::READ}});
         } else {
             // PostAdd/PostSub operations
-            // assign the original variable to the temporary one
-            varp->addNextHere(new AstAssign{fl, writep->cloneTree(true), operp});
+            // Assign the original variable to the temporary one
+            AstAssign* const assignp = new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE},
+                                                     readp->cloneTreePure(true)};
+            insertNextToStmt(nodep, assignp);
             // Increment the original variable by one
-            varp->addNextHere(new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE},
-                                            readp->cloneTree(true)});
+            assignp->addNextHere(new AstAssign{fl, writep, operp});
         }
 
         // Replace the node with the temporary
